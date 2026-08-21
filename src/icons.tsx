@@ -93,3 +93,17 @@ export const IconX = (p: P) => (
     <path d="M18 6 6 18M6 6l12 12" />
   </S>
 );
+
+export const IconXml = (p: P) => (
+  <S {...p}>
+    <path d="M8 6 3 12l5 6M16 6l5 6-5 6M13 4l-3 16" />
+  </S>
+);
+
+export const IconEInvoice = (p: P) => (
+  <S {...p}>
+    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+    <path d="M14 2v6h6" />
+    <path d="M14.5 12.5a3.2 3.2 0 1 0 0 5M8.6 13.9h4.2M8.6 16.1h4.2" />
+  </S>
+);

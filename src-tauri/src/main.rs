@@ -45,6 +45,7 @@ fn main() {
             commands::data_path,
             commands::write_file,
             commands::get_logo,
+            commands::einvoice_xml,
             commands::check_update,
             commands::install_update,
         ])

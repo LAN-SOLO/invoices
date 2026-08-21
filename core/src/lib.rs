@@ -9,6 +9,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::Path;
 
+pub mod einvoice;
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct Customer {
@@ -19,6 +21,10 @@ pub struct Customer {
     pub email: String,
     pub vat_id: String,
     pub notes: String,
+    /// Leitweg-ID bzw. Käufer-Referenz (BT-10) für die E-Rechnung.
+    pub buyer_reference: String,
+    /// ISO-3166-Ländercode; leer = "DE".
+    pub country: String,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -169,13 +175,36 @@ pub fn totals(items: &[LineItem], small_business: bool) -> Totals {
 
 // --- numbering ---------------------------------------------------------
 
-/// Draws the next sequential number for `prefix` and `year`, formats it as
-/// "<prefix>-<year>-<counter, 4 digits>" and advances the counter.
-pub fn next_number(db: &mut Db, prefix: &str, year: i32) -> String {
-    let key = format!("{prefix}-{year}");
+/// Layout des Nummernkreises: mit Jahr (Zähler startet pro Jahr neu) oder
+/// fortlaufend ohne Jahr; Trennzeichen und Stellenzahl sind konfigurierbar.
+#[derive(Debug, Clone, Copy)]
+pub struct NumberFormat<'a> {
+    /// `Some(jahr)` = Jahr einbeziehen (aktuelles Jahr, Zähler pro Jahr),
+    /// `None` = fortlaufender Zähler ohne Jahr.
+    pub year: Option<i32>,
+    /// Mindest-Stellenzahl des Zählers (mit Nullen aufgefüllt), 1..=8.
+    pub digits: usize,
+    /// Trennzeichen zwischen den Teilen, z. B. "-", "/" oder "".
+    pub separator: &'a str,
+}
+
+/// Draws the next sequential number for `prefix`, formats it according to
+/// `fmt` and advances the counter. Counter keys: "<prefix>-<year>" when a
+/// year is included (compatible with pre-0.2.0 data), plain "<prefix>"
+/// for continuous numbering.
+pub fn next_number(db: &mut Db, prefix: &str, fmt: NumberFormat) -> String {
+    let key = match fmt.year {
+        Some(year) => format!("{prefix}-{year}"),
+        None => prefix.to_string(),
+    };
     let counter = db.counters.entry(key).or_insert(0);
     *counter += 1;
-    format!("{prefix}-{year}-{:04}", counter)
+    let digits = fmt.digits.clamp(1, 8);
+    let counter_str = format!("{:0width$}", counter, width = digits);
+    match fmt.year {
+        Some(year) => format!("{prefix}{sep}{year}{sep}{counter_str}", sep = fmt.separator),
+        None => format!("{prefix}{sep}{counter_str}", sep = fmt.separator),
+    }
 }
 
 // --- persistence -------------------------------------------------------
@@ -270,15 +299,44 @@ mod tests {
         assert_eq!(t.gross_cents, t.net_cents);
     }
 
+    fn fmt_year(year: i32) -> NumberFormat<'static> {
+        NumberFormat { year: Some(year), digits: 4, separator: "-" }
+    }
+
     #[test]
     fn numbering_is_sequential_per_prefix_and_year() {
         let mut db = Db::default();
-        assert_eq!(next_number(&mut db, "RE", 2026), "RE-2026-0001");
-        assert_eq!(next_number(&mut db, "RE", 2026), "RE-2026-0002");
-        assert_eq!(next_number(&mut db, "GS", 2026), "GS-2026-0001");
-        assert_eq!(next_number(&mut db, "RE", 2027), "RE-2027-0001");
+        assert_eq!(next_number(&mut db, "RE", fmt_year(2026)), "RE-2026-0001");
+        assert_eq!(next_number(&mut db, "RE", fmt_year(2026)), "RE-2026-0002");
+        assert_eq!(next_number(&mut db, "GS", fmt_year(2026)), "GS-2026-0001");
+        assert_eq!(next_number(&mut db, "RE", fmt_year(2027)), "RE-2027-0001");
         // the old year's counter is untouched
-        assert_eq!(next_number(&mut db, "RE", 2026), "RE-2026-0003");
+        assert_eq!(next_number(&mut db, "RE", fmt_year(2026)), "RE-2026-0003");
+    }
+
+    #[test]
+    fn numbering_layouts() {
+        let mut db = Db::default();
+        // fortlaufend ohne Jahr — eigener Zähler, unabhängig vom Jahres-Zähler
+        let cont = NumberFormat { year: None, digits: 5, separator: "-" };
+        assert_eq!(next_number(&mut db, "RE", cont), "RE-00001");
+        assert_eq!(next_number(&mut db, "RE", fmt_year(2026)), "RE-2026-0001");
+        assert_eq!(next_number(&mut db, "RE", cont), "RE-00002");
+        // Trennzeichen-Varianten
+        let slash = NumberFormat { year: Some(2026), digits: 3, separator: "/" };
+        assert_eq!(next_number(&mut db, "GS", slash), "GS/2026/001");
+        let none = NumberFormat { year: None, digits: 4, separator: "" };
+        assert_eq!(next_number(&mut db, "ST", none), "ST0001");
+    }
+
+    #[test]
+    fn numbering_counter_key_is_stable_across_layout_changes() {
+        // Wechsel des Layouts (Stellen/Trennzeichen) darf den Zähler nicht
+        // zurücksetzen — nur Jahr an/aus wechselt den Zähler-Schlüssel.
+        let mut db = Db::default();
+        next_number(&mut db, "RE", fmt_year(2026));
+        let wide = NumberFormat { year: Some(2026), digits: 6, separator: "/" };
+        assert_eq!(next_number(&mut db, "RE", wide), "RE/2026/000002");
     }
 
     #[test]
@@ -307,7 +365,7 @@ mod tests {
             name: "ACME GmbH".into(),
             ..Default::default()
         });
-        next_number(&mut db, "RE", 2026);
+        next_number(&mut db, "RE", fmt_year(2026));
         save_db(&db, &path).unwrap();
         let loaded = load_db(&path).unwrap();
         assert_eq!(loaded.customers.len(), 1);

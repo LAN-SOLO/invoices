@@ -20,6 +20,30 @@
   --radius: 4px;
 }
 
+/* Darstellung: data-theme/data-accent werden von App.tsx aus den
+   Einstellungen auf <html> gesetzt. */
+html[data-accent='emerald'] { --blue: #34d399; --blue-dim: #10b981; }
+html[data-accent='violet'] { --blue: #a78bfa; --blue-dim: #8b5cf6; }
+html[data-accent='amber'] { --blue: #fbbf24; --blue-dim: #f59e0b; }
+
+html[data-theme='light'] {
+  --bg: #eef2f8;
+  --bg-panel: #ffffff;
+  --bg-raised: #e4eaf3;
+  --bg-hover: #d8e2ef;
+  --border: #c3cfe0;
+  --text: #16233a;
+  --text-dim: #46586f;
+  --text-faint: #7a8ca3;
+  --blue: #0284c7;
+  --blue-dim: #0369a1;
+}
+html[data-theme='light'][data-accent='emerald'] { --blue: #059669; --blue-dim: #047857; }
+html[data-theme='light'][data-accent='violet'] { --blue: #7c3aed; --blue-dim: #6d28d9; }
+html[data-theme='light'][data-accent='amber'] { --blue: #d97706; --blue-dim: #b45309; }
+html[data-theme='light'] button.primary,
+html[data-theme='light'] .hlp-tut-nav .hlp-primary { color: #ffffff; }
+
 * { box-sizing: border-box; margin: 0; padding: 0; }
 
 html, body, #root { height: 100%; }

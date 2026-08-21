@@ -1,9 +1,9 @@
 import { useState } from 'react';
 import { open } from '@tauri-apps/plugin-dialog';
-import { api, Settings, UpdateInfo } from '../api';
+import { api, numberPreview, Settings, UpdateInfo } from '../api';
 import { Dict } from '../i18n';
 
-const APP_VERSION = '0.1.1';
+const APP_VERSION = '0.2.0';
 
 export function SettingsModal({
   settings,
@@ -65,6 +65,33 @@ export function SettingsModal({
             <option value="en">English</option>
           </select>
         </label>
+
+        <div className="sep" />
+        <div className="fieldlabel">{t.secAppearance}</div>
+        <div className="row2">
+          <label className="field grow1">
+            <span>{t.themeLabel}</span>
+            <select
+              value={s.theme}
+              onChange={(e) => set('theme', e.target.value as Settings['theme'])}
+            >
+              <option value="dark">{t.themeDark}</option>
+              <option value="light">{t.themeLight}</option>
+            </select>
+          </label>
+          <label className="field grow1">
+            <span>{t.accentLabel}</span>
+            <select
+              value={s.accent}
+              onChange={(e) => set('accent', e.target.value as Settings['accent'])}
+            >
+              <option value="sky">{t.accentSky}</option>
+              <option value="emerald">{t.accentEmerald}</option>
+              <option value="violet">{t.accentViolet}</option>
+              <option value="amber">{t.accentAmber}</option>
+            </select>
+          </label>
+        </div>
 
         <div className="sep" />
         <div className="fieldlabel">{t.secCompany}</div>
@@ -178,6 +205,81 @@ export function SettingsModal({
             />
           </label>
         </div>
+
+        <div className="sep" />
+        <div className="fieldlabel">{t.secNumbering}</div>
+        <label className="check">
+          <input
+            type="checkbox"
+            checked={s.numberIncludeYear}
+            onChange={(e) => set('numberIncludeYear', e.target.checked)}
+          />
+          {t.numberIncludeYear}
+        </label>
+        <div className="row2">
+          <label className="field grow1">
+            <span>{t.numberDigits}</span>
+            <select
+              value={s.numberDigits}
+              onChange={(e) => set('numberDigits', Number(e.target.value))}
+            >
+              {[3, 4, 5, 6].map((d) => (
+                <option key={d} value={d}>
+                  {d}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="field grow1">
+            <span>{t.numberSeparator}</span>
+            <select
+              value={s.numberSeparator}
+              onChange={(e) => set('numberSeparator', e.target.value)}
+            >
+              <option value="-">-</option>
+              <option value="/">/</option>
+              <option value="">{t.sepNone}</option>
+            </select>
+          </label>
+        </div>
+        <div className="note">
+          {'// '}
+          {t.numberPreviewLabel}:{' '}
+          {numberPreview(s.invoicePrefix, s.numberIncludeYear, s.numberDigits, s.numberSeparator)}
+        </div>
+
+        <div className="row2">
+          <label className="field grow1">
+            <span>{t.defaultUnit}</span>
+            <input
+              type="text"
+              value={s.defaultUnit}
+              onChange={(e) => set('defaultUnit', e.target.value)}
+            />
+          </label>
+          <label className="field grow1">
+            <span>{t.countryCode}</span>
+            <input
+              type="text"
+              value={s.countryCode}
+              placeholder="DE"
+              onChange={(e) => set('countryCode', e.target.value.toUpperCase())}
+            />
+          </label>
+        </div>
+        <label className="field">
+          <span>{t.defaultIntro}</span>
+          <input
+            type="text"
+            value={s.defaultIntro}
+            onChange={(e) => set('defaultIntro', e.target.value)}
+          />
+        </label>
+
+        <div className="sep" />
+        <div className="fieldlabel">{t.secEInvoice}</div>
+        <div className="note">{t.einvoiceNote}</div>
+
         <label className="field">
           <span>{t.pdfFooter}</span>
           <input
@@ -190,6 +292,14 @@ export function SettingsModal({
 
         <div className="sep" />
         <div className="fieldlabel">{t.updates}</div>
+        <label className="check">
+          <input
+            type="checkbox"
+            checked={s.autoUpdate}
+            onChange={(e) => set('autoUpdate', e.target.checked)}
+          />
+          {t.autoUpdate}
+        </label>
         <div className="updatebox">
           <span>
             {t.version} {APP_VERSION}

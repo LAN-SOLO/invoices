@@ -35,8 +35,24 @@ pub struct Settings {
     pub invoice_prefix: String,
     pub credit_prefix: String,
     pub cancel_prefix: String,
+    /// Nummernkreis-Layout: Jahr einbeziehen (Zähler pro Jahr) oder
+    /// fortlaufend; Trennzeichen und Stellenzahl.
+    pub number_include_year: bool,
+    pub number_digits: u8,
+    pub number_separator: String,
     /// Free-text footer line on PDFs (e.g. a thank-you note).
     pub pdf_footer: String,
+    /// ISO-3166-Ländercode des eigenen Unternehmens (für die E-Rechnung).
+    pub country_code: String,
+    /// Standard-Einheit für neue Positionen/Artikel.
+    pub default_unit: String,
+    /// Standard-Einleitungstext für neue Rechnungen.
+    pub default_intro: String,
+    /// Darstellung: "dark" | "light" + Akzentfarbe.
+    pub theme: String,
+    pub accent: String,
+    /// Updates beim Start automatisch installieren (statt nur Hinweis).
+    pub auto_update: bool,
 }
 
 impl Default for Settings {
@@ -59,7 +75,16 @@ impl Default for Settings {
             invoice_prefix: "RE".into(),
             credit_prefix: "GS".into(),
             cancel_prefix: "ST".into(),
+            number_include_year: true,
+            number_digits: 4,
+            number_separator: "-".into(),
             pdf_footer: String::new(),
+            country_code: "DE".into(),
+            default_unit: "Stk".into(),
+            default_intro: String::new(),
+            theme: "dark".into(),
+            accent: "sky".into(),
+            auto_update: false,
         }
     }
 }

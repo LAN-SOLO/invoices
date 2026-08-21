@@ -10,6 +10,10 @@ export interface Customer {
   email: string;
   vatId: string;
   notes: string;
+  /** Leitweg-ID bzw. Käufer-Referenz (BT-10) für die E-Rechnung. */
+  buyerReference: string;
+  /** ISO-3166-Ländercode; leer = DE. */
+  country: string;
 }
 
 export interface Product {
@@ -67,7 +71,21 @@ export interface Settings {
   invoicePrefix: string;
   creditPrefix: string;
   cancelPrefix: string;
+  numberIncludeYear: boolean;
+  numberDigits: number;
+  numberSeparator: string;
   pdfFooter: string;
+  countryCode: string;
+  defaultUnit: string;
+  defaultIntro: string;
+  theme: 'dark' | 'light';
+  accent: 'sky' | 'emerald' | 'violet' | 'amber';
+  autoUpdate: boolean;
+}
+
+export interface EInvoice {
+  xml: string;
+  suggestedName: string;
 }
 
 export interface UpdateInfo {
@@ -95,6 +113,7 @@ export const api = {
   writeFile: (path: string, dataBase64: string) =>
     invoke<void>('write_file', { path, dataBase64 }),
   getLogo: () => invoke<string | null>('get_logo'),
+  einvoiceXml: (id: string) => invoke<EInvoice>('einvoice_xml', { id }),
   checkUpdate: () => invoke<UpdateInfo | null>('check_update'),
   installUpdate: () => invoke<void>('install_update'),
 };
@@ -171,6 +190,19 @@ export function addDaysIso(iso: string, days: number): string {
 
 export function isOverdue(doc: Doc): boolean {
   return doc.status === 'open' && !!doc.dueDate && doc.dueDate < todayIso();
+}
+
+/** Vorschau des Nummernkreises, z. B. "RE-2026-0001" — spiegelt core::next_number. */
+export function numberPreview(
+  prefix: string,
+  includeYear: boolean,
+  digits: number,
+  separator: string
+): string {
+  const counter = String(1).padStart(Math.min(Math.max(digits, 1), 8), '0');
+  return includeYear
+    ? `${prefix}${separator}${new Date().getFullYear()}${separator}${counter}`
+    : `${prefix}${separator}${counter}`;
 }
 
 /// Parse a money input ("1.234,56" or "1234.56") to cents — NaN-safe.

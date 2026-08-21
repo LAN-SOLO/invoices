@@ -21,10 +21,12 @@ import { CustomerModal, ProductModal } from './components/Modals';
 import { SettingsModal } from './components/SettingsModal';
 import { Help } from './components/Help';
 import { buildPdf, bytesToBase64 } from './pdf';
+import { embedZugferd } from './zugferd';
 import {
   IconBox,
   IconCancel,
   IconCheck,
+  IconEInvoice,
   IconEdit,
   IconGear,
   IconInvoice,
@@ -32,6 +34,7 @@ import {
   IconPlus,
   IconTrash,
   IconUsers,
+  IconXml,
 } from './icons';
 
 type Tab = 'docs' | 'customers' | 'products';
@@ -72,10 +75,30 @@ export default function App() {
   }, [query]);
 
   useEffect(() => {
-    api.getSettings().then(setSettings);
-    // stiller Update-Check beim Start — installiert wird nur nach Klick
-    api.checkUpdate().then(setUpdateAvail).catch(() => {});
+    api.getSettings().then((s) => {
+      setSettings(s);
+      // stiller Update-Check beim Start — mit Auto-Update wird direkt
+      // installiert, sonst nur der Banner gezeigt
+      api
+        .checkUpdate()
+        .then((u) => {
+          if (!u) return;
+          setUpdateAvail(u);
+          if (s.autoUpdate) {
+            setInstalling(true);
+            api.installUpdate().catch(() => setInstalling(false));
+          }
+        })
+        .catch(() => {});
+    });
   }, []);
+
+  // Darstellung aus den Einstellungen auf <html> spiegeln
+  useEffect(() => {
+    if (!settings) return;
+    document.documentElement.dataset.theme = settings.theme;
+    document.documentElement.dataset.accent = settings.accent;
+  }, [settings]);
 
   useEffect(refresh, [refresh]);
 
@@ -101,7 +124,7 @@ export default function App() {
       items: [],
       status: 'draft',
       smallBusiness: settings.smallBusiness,
-      intro: '',
+      intro: kind === 'invoice' ? settings.defaultIntro : '',
       notes: '',
       paidAt: null,
       relatedId: null,
@@ -154,6 +177,45 @@ export default function App() {
       if (!path) return;
       await api.writeFile(path, bytesToBase64(bytes));
       showToast(t.pdfSaved);
+    } catch (e) {
+      showToast(String(e));
+    }
+  };
+
+  const exportXml = async (doc: Doc) => {
+    try {
+      const { xml, suggestedName } = await api.einvoiceXml(doc.id);
+      const path = await save({
+        defaultPath: suggestedName,
+        filters: [{ name: 'XML', extensions: ['xml'] }],
+      });
+      if (!path) return;
+      await api.writeFile(path, bytesToBase64(new TextEncoder().encode(xml)));
+      showToast(t.xmlSaved);
+    } catch (e) {
+      showToast(String(e));
+    }
+  };
+
+  const exportZugferd = async (doc: Doc) => {
+    if (!settings) return;
+    try {
+      const [{ xml }, logo] = await Promise.all([
+        api.einvoiceXml(doc.id),
+        api.getLogo().catch(() => null),
+      ]);
+      const related = doc.relatedId
+        ? docs.find((x) => x.id === doc.relatedId)?.number ?? null
+        : null;
+      const { bytes } = buildPdf(doc, settings, t, lang, logo, related);
+      const hybrid = await embedZugferd(bytes, xml, doc.number ?? 'invoice');
+      const path = await save({
+        defaultPath: `${doc.number ?? 'beleg'}-zugferd.pdf`,
+        filters: [{ name: 'PDF', extensions: ['pdf'] }],
+      });
+      if (!path) return;
+      await api.writeFile(path, bytesToBase64(hybrid));
+      showToast(t.zugferdSaved);
     } catch (e) {
       showToast(String(e));
     }
@@ -259,7 +321,16 @@ export default function App() {
               <button
                 className="primary"
                 onClick={() =>
-                  setEditCustomer({ id: uid(), name: '', address: '', email: '', vatId: '', notes: '' })
+                  setEditCustomer({
+                    id: uid(),
+                    name: '',
+                    address: '',
+                    email: '',
+                    vatId: '',
+                    notes: '',
+                    buyerReference: '',
+                    country: '',
+                  })
                 }
               >
                 <IconPlus /> {t.newCustomer}
@@ -273,7 +344,7 @@ export default function App() {
                     id: uid(),
                     name: '',
                     description: '',
-                    unit: 'Stk',
+                    unit: settings.defaultUnit || 'Stk',
                     unitPriceCents: 0,
                     vatRate: settings.defaultVatRate,
                   })
@@ -364,9 +435,21 @@ export default function App() {
                         <td>{statusChip(doc)}</td>
                         <td className="actions" onClick={(e) => e.stopPropagation()}>
                           {doc.status !== 'draft' && (
-                            <button className="icon" title={t.actPdf} onClick={() => exportPdf(doc)}>
-                              <IconPdf />
-                            </button>
+                            <>
+                              <button className="icon" title={t.actPdf} onClick={() => exportPdf(doc)}>
+                                <IconPdf />
+                              </button>
+                              <button
+                                className="icon"
+                                title={t.actZugferd}
+                                onClick={() => exportZugferd(doc)}
+                              >
+                                <IconEInvoice />
+                              </button>
+                              <button className="icon" title={t.actXml} onClick={() => exportXml(doc)}>
+                                <IconXml />
+                              </button>
+                            </>
                           )}
                           {doc.status === 'open' && (
                             <button

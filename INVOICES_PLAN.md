@@ -29,7 +29,12 @@ Website: https://lan-solo.com/de/tools/invoices/
       Festschreiben mit Nummernkreisen, §19, PDF-Export, offene Posten,
       Hilfe (Tutorial + Handbuch), DE/EN, In-App-Updates
 - [ ] Phase 2 — Angebote, Auftragsbestätigungen, Lieferscheine (Belegkette per Klick)
-- [ ] Phase 3 — E-Rechnung: XRechnung (EN 16931) erzeugen, später ZUGFeRD
+- [x] Phase 3 — v0.2.0: E-Rechnung nach EN 16931 — XRechnung-XML (CII) aus
+      `core/einvoice.rs` (getestet) + ZUGFeRD-PDF via pdf-lib (factur-x.xml,
+      XMP-PDF/A-3-Deklaration, sRGB-OutputIntent); dazu Nummernkreis-Layout
+      (Jahr an/aus, Stellen, Trennzeichen), Themes (Hell/Dunkel + 4 Akzente),
+      Auto-Update-Option, Standard-Einheit/-Einleitungstext, Leitweg-ID am Kunden.
+      Hinweis: strikte PDF/A-3-Validierung (Font-Embedding) ist Feinschliff für später.
 - [ ] Phase 4 — Wiederkehrende Rechnungen, Zahlungserinnerung & Mahnung
 - [ ] Phase 5 — Auswertungen (Umsatz je Monat/Kunde), CSV-Export
 - [ ] Phase 6 — später: invoices billed (12 €/Jahr) — Lizenzmodell nach

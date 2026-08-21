@@ -1,12 +1,31 @@
 use crate::settings::{self, Settings};
 use crate::state::AppState;
 use base64::Engine;
-use invoices_core::{doc_matches, next_number, Customer, Doc, DocKind, DocStatus, Product};
+use invoices_core::{
+    doc_matches, next_number, Customer, Doc, DocKind, DocStatus, NumberFormat, Product,
+};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, State};
 
 fn today() -> chrono::NaiveDate {
     chrono::Local::now().date_naive()
+}
+
+/// Nummernformat aus den Einstellungen: Jahr immer das des Belegdatums
+/// (bzw. das aktuelle), fortlaufend wenn abgeschaltet.
+fn number_format(settings: &Settings, doc_year: Option<i32>) -> NumberFormat<'_> {
+    NumberFormat {
+        year: if settings.number_include_year {
+            Some(doc_year.unwrap_or_else(|| {
+                use chrono::Datelike;
+                today().year()
+            }))
+        } else {
+            None
+        },
+        digits: settings.number_digits.clamp(1, 8) as usize,
+        separator: &settings.number_separator,
+    }
 }
 
 // --- customers ---------------------------------------------------------
@@ -146,15 +165,9 @@ pub fn finalize_doc(app: AppHandle, st: State<'_, AppState>, id: String) -> Resu
             DocKind::CreditNote => settings.credit_prefix.clone(),
             DocKind::Cancellation => settings.cancel_prefix.clone(),
         };
-        let year = db.docs[idx]
-            .date
-            .get(..4)
-            .and_then(|y| y.parse::<i32>().ok())
-            .unwrap_or_else(|| {
-                use chrono::Datelike;
-                today().year()
-            });
-        let number = next_number(&mut db, &prefix, year);
+        let doc_year = db.docs[idx].date.get(..4).and_then(|y| y.parse::<i32>().ok());
+        let fmt = number_format(&settings, doc_year);
+        let number = next_number(&mut db, &prefix, fmt);
         let doc = &mut db.docs[idx];
         doc.number = Some(number);
         doc.status = DocStatus::Open;
@@ -235,11 +248,8 @@ pub fn cancel_doc(app: AppHandle, st: State<'_, AppState>, id: String, new_id: S
             created_at: chrono::Local::now().to_rfc3339(),
         };
         // Stornos gehen sofort live — sie dokumentieren, sie fordern nicht.
-        let year = {
-            use chrono::Datelike;
-            today().year()
-        };
-        let number = next_number(&mut db, &settings.cancel_prefix, year);
+        let fmt = number_format(&settings, None);
+        let number = next_number(&mut db, &settings.cancel_prefix, fmt);
         storno.number = Some(number);
         if let Some(orig) = db.docs.iter_mut().find(|d| d.id == id) {
             orig.status = DocStatus::Cancelled;
@@ -311,6 +321,56 @@ pub fn get_logo(st: State<'_, AppState>) -> Option<String> {
     };
     let b64 = base64::engine::general_purpose::STANDARD.encode(bytes);
     Some(format!("data:{mime};base64,{b64}"))
+}
+
+// --- e-invoice ---------------------------------------------------------
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EInvoiceDto {
+    pub xml: String,
+    pub suggested_name: String,
+}
+
+/// EN-16931-XML (Factur-X/XRechnung) für einen festgeschriebenen Beleg.
+#[tauri::command]
+pub fn einvoice_xml(st: State<'_, AppState>, id: String) -> Result<EInvoiceDto, String> {
+    let (doc, buyer_reference, buyer_country) = {
+        let db = st.db.lock().unwrap();
+        let doc = db
+            .docs
+            .iter()
+            .find(|d| d.id == id)
+            .cloned()
+            .ok_or("doc-not-found")?;
+        let customer = db.customers.iter().find(|c| c.id == doc.customer_id);
+        (
+            doc,
+            customer.map(|c| c.buyer_reference.clone()).unwrap_or_default(),
+            customer.map(|c| c.country.clone()).unwrap_or_default(),
+        )
+    };
+    if doc.status == DocStatus::Draft {
+        return Err("doc-draft".into());
+    }
+    let settings = st.settings.lock().unwrap().clone();
+    let seller = invoices_core::einvoice::Seller {
+        name: settings.company_name.clone(),
+        address: settings.company_address.clone(),
+        email: settings.company_email.clone(),
+        tax_number: settings.tax_number.clone(),
+        vat_id: settings.vat_id.clone(),
+        iban: settings.iban.clone(),
+        bic: settings.bic.clone(),
+        bank_name: settings.bank_name.clone(),
+        country: settings.country_code.clone(),
+    };
+    let xml = invoices_core::einvoice::einvoice_xml(&doc, &seller, &buyer_reference, &buyer_country);
+    let base = doc.number.unwrap_or_else(|| "beleg".into());
+    Ok(EInvoiceDto {
+        xml,
+        suggested_name: format!("{base}.xml"),
+    })
 }
 
 // --- updates -----------------------------------------------------------

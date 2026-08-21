@@ -83,7 +83,7 @@ export function DocEditor({
           name: '',
           description: '',
           quantity: 1,
-          unit: 'Stk',
+          unit: settings.defaultUnit || 'Stk',
           unitPriceCents: 0,
           vatRate: settings.defaultVatRate,
         };

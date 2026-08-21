@@ -37,6 +37,25 @@ export function CustomerModal({
           <span>{t.custVatId}</span>
           <input type="text" value={c.vatId} onChange={(e) => set('vatId', e.target.value)} />
         </label>
+        <div className="row2">
+          <label className="field grow1">
+            <span>{t.custBuyerRef}</span>
+            <input
+              type="text"
+              value={c.buyerReference}
+              onChange={(e) => set('buyerReference', e.target.value)}
+            />
+          </label>
+          <label className="field" style={{ width: 140 }}>
+            <span>{t.custCountry}</span>
+            <input
+              type="text"
+              value={c.country}
+              placeholder="DE"
+              onChange={(e) => set('country', e.target.value.toUpperCase())}
+            />
+          </label>
+        </div>
         <label className="field">
           <span>{t.custNotes}</span>
           <textarea rows={2} value={c.notes} onChange={(e) => set('notes', e.target.value)} />
