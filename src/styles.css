@@ -406,6 +406,92 @@ table.items input.desc { margin-top: 4px; font-size: 11.5px; color: var(--text-d
 
 .kindselect { width: auto; font-size: 12px; padding: 4px 8px; }
 
+/* settings tabs, schemes & colorpickers */
+.modal.settings { width: 640px; }
+.set-tabs { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 14px; }
+.scheme-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(126px, 1fr));
+  gap: 6px;
+  margin-bottom: 12px;
+}
+.scheme {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  padding: 6px 8px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-size: 10.5px;
+  color: var(--text-dim);
+  overflow: hidden;
+}
+.scheme.active { border-color: var(--blue-dim); color: var(--blue); }
+.scheme .sw {
+  width: 11px;
+  height: 11px;
+  border-radius: 2px;
+  flex-shrink: 0;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+}
+.scheme-name {
+  margin-left: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.color-row { display: flex; gap: 14px; margin: 4px 0 6px; flex-wrap: wrap; }
+.color-field { display: flex; flex-direction: column; gap: 4px; }
+.color-field > span {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--text-faint);
+}
+.color-field input[type='color'] {
+  width: 56px;
+  height: 30px;
+  padding: 2px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+
+/* pdf mock (live preview in settings) */
+.pdf-mock {
+  background: #ffffff;
+  color: #1f2937;
+  border-radius: 4px;
+  padding: 0 0 10px;
+  margin-bottom: 12px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  font-family: var(--sans);
+  font-size: 11.5px;
+  max-width: 420px;
+}
+.mock-band { height: 22px; }
+.mock-title { font-weight: 700; font-size: 13px; padding: 10px 12px 6px; }
+.mock-thead {
+  display: flex;
+  justify-content: space-between;
+  padding: 4px 12px;
+  color: #ffffff;
+  font-weight: 600;
+}
+.mock-row { display: flex; justify-content: space-between; padding: 4px 12px; }
+.mock-total {
+  display: flex;
+  justify-content: space-between;
+  padding: 6px 12px 0;
+  margin: 4px 12px 0;
+  border-top: 2px solid;
+  font-weight: 700;
+}
+.mock-total span:first-child { margin-right: 20px; }
+
 /* toast */
 .toast {
   position: fixed;

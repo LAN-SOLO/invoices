@@ -18,7 +18,7 @@ interface Props {
   showToast: (msg: string) => void;
 }
 
-const LAYOUTS: PdfLayout[] = ['classic', 'modern', 'compact'];
+const LAYOUTS: PdfLayout[] = ['classic', 'modern', 'compact', 'terminal'];
 
 export function PdfPreview({ doc, settings, relatedNumber, t, lang, onClose, showToast }: Props) {
   const [layout, setLayout] = useState<PdfLayout>(
@@ -39,7 +39,12 @@ export function PdfPreview({ doc, settings, relatedNumber, t, lang, onClose, sho
   }, []);
 
   const layoutLabel: Record<PdfLayout, string> = useMemo(
-    () => ({ classic: t.layoutClassic, modern: t.layoutModern, compact: t.layoutCompact }),
+    () => ({
+      classic: t.layoutClassic,
+      modern: t.layoutModern,
+      compact: t.layoutCompact,
+      terminal: t.layoutTerminal,
+    }),
     [t]
   );
 

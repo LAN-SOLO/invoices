@@ -2,6 +2,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod commands;
+mod companies;
 mod settings;
 mod state;
 
@@ -17,13 +18,17 @@ fn main() {
         .plugin(tauri_plugin_process::init())
         .setup(|app| {
             let handle = app.handle().clone();
-            let s = settings::load(&handle);
-            let db_path = state::db_path(&handle);
+            let registry = companies::load_registry(&handle);
+            companies::store_registry(&handle, &registry);
+            let active = registry.active.clone();
+            let s = settings::load_for(&handle, &active);
+            let db_path = companies::db_path(&handle, &active);
             let db = invoices_core::load_db(&db_path).unwrap_or_default();
             app.manage(AppState {
                 db: Mutex::new(db),
                 settings: Mutex::new(s),
-                db_path,
+                db_path: Mutex::new(db_path),
+                active_company: Mutex::new(active),
             });
             // automatisches lokales Backup beim Start (falls aktiviert)
             commands::auto_backup(&app.state::<AppState>());
@@ -49,6 +54,10 @@ fn main() {
             commands::import_backup,
             commands::get_settings,
             commands::set_settings,
+            commands::list_companies,
+            commands::add_company,
+            commands::switch_company,
+            commands::delete_company,
             commands::data_path,
             commands::write_file,
             commands::get_logo,

@@ -1,8 +1,8 @@
 // PDF-Erzeugung mit jsPDF: A4-Beleg mit Briefkopf, Empfängerblock,
-// Positionstabelle und USt-Aufstellung — in drei Layouts (klassisch,
-// modern, kompakt) für alle Belegarten. Lieferscheine kommen ohne
-// Preise. Erzeugt Bytes — gespeichert wird über den Save-Dialog +
-// Rust-Command (write_file).
+// Positionstabelle und USt-Aufstellung — vier Layouts (klassisch,
+// modern, kompakt, terminal) und ein 4-Farben-Schema (c1 Titel,
+// c2 Akzent/Band, c3 Tabellenkopf, c4 Zebra), frei per Colorpicker.
+// Lieferscheine kommen ohne Preise.
 
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -15,37 +15,42 @@ import {
   totals,
 } from './api';
 import { Dict, Lang } from './i18n';
+import { contrastText, hexToRgb } from './schemes';
 
-export type PdfLayout = 'classic' | 'modern' | 'compact';
+export type PdfLayout = 'classic' | 'modern' | 'compact' | 'terminal';
 
 const PAGE_W = 210;
 
-const ACCENTS: Record<string, [number, number, number]> = {
-  sky: [2, 132, 199],
-  emerald: [5, 150, 105],
-  violet: [124, 58, 237],
-  amber: [217, 119, 6],
-};
+type Rgb = [number, number, number];
 
 interface LayoutSpec {
   margin: number;
   band: boolean;
-  headFill: [number, number, number];
-  headText: number | [number, number, number];
-  titleColor: number | [number, number, number];
+  mono: boolean;
+  font: string;
+  headFill: Rgb;
+  headText: Rgb;
+  titleColor: Rgb;
+  zebra: Rgb | null;
   bodySize: number;
   tablePad: number;
 }
 
-function layoutSpec(layout: PdfLayout, accent: [number, number, number]): LayoutSpec {
+function layoutSpec(layout: PdfLayout, s: Settings): LayoutSpec {
+  const c1 = hexToRgb(s.pdfC1);
+  const c3 = hexToRgb(s.pdfC3);
+  const c4 = hexToRgb(s.pdfC4);
   switch (layout) {
     case 'modern':
       return {
         margin: 20,
         band: true,
-        headFill: accent,
-        headText: 255,
-        titleColor: accent,
+        mono: false,
+        font: 'helvetica',
+        headFill: c3,
+        headText: contrastText(s.pdfC3),
+        titleColor: c1,
+        zebra: c4,
         bodySize: 9,
         tablePad: 2.2,
       };
@@ -53,19 +58,38 @@ function layoutSpec(layout: PdfLayout, accent: [number, number, number]): Layout
       return {
         margin: 14,
         band: false,
-        headFill: [235, 238, 244],
-        headText: 30,
-        titleColor: 20,
+        mono: false,
+        font: 'helvetica',
+        headFill: c4,
+        headText: c1,
+        titleColor: c1,
+        zebra: null,
         bodySize: 8,
         tablePad: 1.4,
+      };
+    case 'terminal':
+      return {
+        margin: 18,
+        band: false,
+        mono: true,
+        font: 'courier',
+        headFill: c4,
+        headText: c1,
+        titleColor: c1,
+        zebra: null,
+        bodySize: 8.5,
+        tablePad: 1.8,
       };
     default:
       return {
         margin: 20,
         band: false,
-        headFill: [15, 23, 40],
-        headText: 235,
-        titleColor: 20,
+        mono: false,
+        font: 'helvetica',
+        headFill: c3,
+        headText: contrastText(s.pdfC3),
+        titleColor: c1,
+        zebra: c4,
         bodySize: 9,
         tablePad: 2,
       };
@@ -98,76 +122,82 @@ export function buildPdf(
   relatedNumber: string | null,
   layout?: PdfLayout
 ): { bytes: Uint8Array; suggestedName: string } {
-  const spec = layoutSpec(
-    layout ?? (settings.pdfLayout as PdfLayout) ?? 'classic',
-    ACCENTS[settings.accent] ?? ACCENTS.sky
-  );
+  const activeLayout = layout ?? (settings.pdfLayout as PdfLayout) ?? 'classic';
+  const spec = layoutSpec(activeLayout, settings);
   const M = spec.margin;
   const pdf = new jsPDF({ unit: 'mm', format: 'a4' });
   const money = (cents: number) => fmtMoney(cents, lang);
   const isDelivery = doc.kind === 'deliverynote';
   const companyLines = settings.companyAddress.split('\n').filter(Boolean);
+  const accent = hexToRgb(settings.pdfC2);
+  const showHeader = settings.pdfShowCompanyHeader;
+  const F = spec.font;
+
+  const addLogo = (y: number, h: number) => {
+    if (!logoDataUrl) return;
+    try {
+      const props = pdf.getImageProperties(logoDataUrl);
+      const w = (props.width / props.height) * h;
+      pdf.addImage(logoDataUrl, PAGE_W - M - w, y, w, h);
+    } catch {
+      /* kaputtes Logo bricht kein PDF */
+    }
+  };
 
   // --- letterhead ---
   let y = M;
   if (spec.band) {
-    const [r, g, b] = spec.headFill;
-    pdf.setFillColor(r, g, b);
+    pdf.setFillColor(...accent);
     pdf.rect(0, 0, PAGE_W, 30, 'F');
-    pdf.setFont('helvetica', 'bold');
-    pdf.setFontSize(15);
-    pdf.setTextColor(255);
-    pdf.text(settings.companyName || '', M, 13);
-    pdf.setFont('helvetica', 'normal');
-    pdf.setFontSize(8);
-    pdf.text(companyLines.join(' · '), M, 20);
-    if (logoDataUrl) {
-      try {
-        const props = pdf.getImageProperties(logoDataUrl);
-        const h = 16;
-        const w = (props.width / props.height) * h;
-        pdf.addImage(logoDataUrl, PAGE_W - M - w, 7, w, h);
-      } catch {
-        /* kaputtes Logo bricht kein PDF */
-      }
+    const bandText = contrastText(settings.pdfC2);
+    if (showHeader) {
+      pdf.setFont(F, 'bold');
+      pdf.setFontSize(15);
+      pdf.setTextColor(...bandText);
+      pdf.text(settings.companyName || '', M, 13);
+      pdf.setFont(F, 'normal');
+      pdf.setFontSize(8);
+      pdf.text(companyLines.join(' · '), M, 20);
     }
+    addLogo(7, 16);
   } else {
-    if (logoDataUrl) {
-      try {
-        const props = pdf.getImageProperties(logoDataUrl);
-        const h = 18;
-        const w = (props.width / props.height) * h;
-        pdf.addImage(logoDataUrl, PAGE_W - M - w, y, w, h);
-      } catch {
-        /* kaputtes Logo bricht kein PDF */
-      }
+    addLogo(y, 18);
+    if (showHeader) {
+      pdf.setFont(F, 'bold');
+      pdf.setFontSize(spec.mono ? 13 : 14);
+      pdf.setTextColor(...spec.titleColor);
+      pdf.text(settings.companyName || '', M, y + 5);
+      pdf.setFont(F, 'normal');
+      pdf.setFontSize(spec.mono ? 8 : 9);
+      pdf.setTextColor(90);
+      pdf.text(companyLines, M, y + 11);
     }
-    pdf.setFont('helvetica', 'bold');
-    pdf.setFontSize(14);
-    pdf.setTextColor(30);
-    pdf.text(settings.companyName || '', M, y + 5);
-    pdf.setFont('helvetica', 'normal');
-    pdf.setFontSize(9);
-    pdf.setTextColor(90);
-    pdf.text(companyLines, M, y + 11);
+    if (spec.mono) {
+      pdf.setDrawColor(...accent);
+      pdf.setLineDashPattern([1.2, 1.2], 0);
+      pdf.line(M, y + 22, PAGE_W - M, y + 22);
+      pdf.setLineDashPattern([], 0);
+    }
   }
 
   // --- recipient block (DIN-ish position) ---
   y = spec.band ? 44 : 50;
+  if (spec.margin < 20) y -= 4;
+  pdf.setFont(F, 'normal');
   pdf.setFontSize(7.5);
   pdf.setTextColor(130);
   const senderLine = [settings.companyName, ...companyLines].filter(Boolean).join(' · ');
   pdf.text(senderLine, M, y);
   pdf.setDrawColor(200);
   pdf.line(M, y + 1.5, M + 85, y + 1.5);
-  pdf.setFontSize(10);
+  pdf.setFontSize(spec.mono ? 9 : 10);
   pdf.setTextColor(30);
   const recipient = [doc.customerName, ...doc.customerAddress.split('\n')].filter(Boolean);
   pdf.text(recipient, M, y + 8);
 
   // --- meta block right ---
-  const metaX = PAGE_W - M - 60;
-  pdf.setFontSize(9);
+  const metaX = PAGE_W - M - 62;
+  pdf.setFontSize(spec.mono ? 8 : 9);
   const meta: [string, string][] = [
     [t.pdf.number, doc.number ?? '—'],
     [t.pdf.date, fmtDate(doc.date, lang)],
@@ -180,22 +210,22 @@ export function buildPdf(
     pdf.setTextColor(120);
     pdf.text(k, metaX, metaY);
     pdf.setTextColor(30);
-    pdf.text(v, metaX + 28, metaY);
+    pdf.text(v, metaX + 30, metaY);
     metaY += 5;
   }
 
   // --- title + intro ---
   y = spec.band ? 86 : 92;
   if (spec.margin < 20) y -= 6;
-  pdf.setFont('helvetica', 'bold');
-  pdf.setFontSize(13);
-  if (Array.isArray(spec.titleColor)) pdf.setTextColor(...spec.titleColor);
-  else pdf.setTextColor(spec.titleColor);
-  pdf.text(`${docTitle(doc, t)} ${doc.number ?? ''}`.trim(), M, y);
+  pdf.setFont(F, 'bold');
+  pdf.setFontSize(spec.mono ? 12 : 13);
+  pdf.setTextColor(...spec.titleColor);
+  const titleText = `${docTitle(doc, t)} ${doc.number ?? ''}`.trim();
+  pdf.text(spec.mono ? `> ${titleText}` : titleText, M, y);
   y += 8;
   if (doc.intro.trim()) {
-    pdf.setFont('helvetica', 'normal');
-    pdf.setFontSize(9.5);
+    pdf.setFont(F, 'normal');
+    pdf.setFontSize(spec.mono ? 8.5 : 9.5);
     pdf.setTextColor(60);
     const intro = pdf.splitTextToSize(doc.intro.trim(), PAGE_W - 2 * M);
     pdf.text(intro, M, y);
@@ -221,23 +251,23 @@ export function buildPdf(
       money(lineTotalCents(item)),
     ];
   });
-  const [hr, hg, hb] = spec.headFill;
   autoTable(pdf, {
     startY: y,
     margin: { left: M, right: M },
     head,
     body,
     styles: {
-      font: 'helvetica',
+      font: F,
       fontSize: spec.bodySize,
       cellPadding: spec.tablePad,
       textColor: 40,
     },
     headStyles: {
-      fillColor: [hr, hg, hb],
-      textColor: spec.headText as number,
+      fillColor: spec.headFill,
+      textColor: spec.headText,
       fontStyle: 'bold',
     },
+    alternateRowStyles: spec.zebra ? { fillColor: spec.zebra } : undefined,
     columnStyles: isDelivery
       ? {
           0: { cellWidth: 10 },
@@ -265,17 +295,19 @@ export function buildPdf(
       sumLines.push([t.pdf.vatLine(v.rate), money(v.vatCents), false]);
     }
     sumLines.push([t.pdf.grossSum, money(sums.grossCents), true]);
-    pdf.setFontSize(9.5);
+    pdf.setFontSize(spec.mono ? 8.5 : 9.5);
     for (const [label, value, strong] of sumLines) {
       if (y > 265) {
         pdf.addPage();
         y = M;
       }
-      pdf.setFont('helvetica', strong ? 'bold' : 'normal');
-      pdf.setTextColor(strong ? 20 : 70);
+      pdf.setFont(F, strong ? 'bold' : 'normal');
       if (strong) {
-        pdf.setDrawColor(120);
+        pdf.setTextColor(...spec.titleColor);
+        pdf.setDrawColor(...accent);
         pdf.line(sumX, y - 3.5, PAGE_W - M, y - 3.5);
+      } else {
+        pdf.setTextColor(70);
       }
       pdf.text(label, sumX, y);
       pdf.text(value, PAGE_W - M, y, { align: 'right' });
@@ -285,8 +317,8 @@ export function buildPdf(
 
   // --- notes: §19 / payment terms ---
   y += 3;
-  pdf.setFont('helvetica', 'normal');
-  pdf.setFontSize(9);
+  pdf.setFont(F, 'normal');
+  pdf.setFontSize(spec.mono ? 8 : 9);
   pdf.setTextColor(70);
   const noteLines: string[] = [];
   if (doc.smallBusiness && !isDelivery) noteLines.push(t.pdf.smallBusinessNote);
@@ -325,9 +357,10 @@ export function buildPdf(
   footerCols.push(col1, col2, col3);
   for (let p = 1; p <= pages; p++) {
     pdf.setPage(p);
-    pdf.setDrawColor(200);
+    pdf.setDrawColor(...accent);
     pdf.line(M, 277, PAGE_W - M, 277);
-    pdf.setFontSize(7.5);
+    pdf.setFont(F, 'normal');
+    pdf.setFontSize(spec.mono ? 7 : 7.5);
     pdf.setTextColor(120);
     const colW = (PAGE_W - 2 * M) / 3;
     footerCols.forEach((col, i) => {

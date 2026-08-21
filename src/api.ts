@@ -105,10 +105,26 @@ export interface Settings {
   defaultIntro: string;
   theme: 'dark' | 'light';
   accent: 'sky' | 'emerald' | 'violet' | 'amber';
-  pdfLayout: 'classic' | 'modern' | 'compact';
+  pdfLayout: 'classic' | 'modern' | 'compact' | 'terminal';
+  pdfScheme: string;
+  pdfC1: string;
+  pdfC2: string;
+  pdfC3: string;
+  pdfC4: string;
+  pdfShowCompanyHeader: boolean;
   autoUpdate: boolean;
   autoBackup: boolean;
   backupDir: string;
+}
+
+export interface CompanyEntry {
+  id: string;
+  label: string;
+}
+
+export interface CompanyRegistry {
+  active: string;
+  list: CompanyEntry[];
 }
 
 export interface EInvoice {
@@ -147,6 +163,10 @@ export const api = {
   deleteTemplate: (id: string) => invoke<void>('delete_template', { id }),
   exportBackup: (path: string) => invoke<void>('export_backup', { path }),
   importBackup: (path: string) => invoke<void>('import_backup', { path }),
+  listCompanies: () => invoke<CompanyRegistry>('list_companies'),
+  addCompany: (id: string, label: string) => invoke<void>('add_company', { id, label }),
+  switchCompany: (id: string) => invoke<void>('switch_company', { id }),
+  deleteCompany: (id: string) => invoke<void>('delete_company', { id }),
   checkUpdate: () => invoke<UpdateInfo | null>('check_update'),
   installUpdate: () => invoke<void>('install_update'),
 };

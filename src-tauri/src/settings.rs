@@ -1,8 +1,6 @@
 //! App settings, stored as JSON in the OS config directory.
 
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
-use tauri::Manager;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
@@ -54,8 +52,17 @@ pub struct Settings {
     /// Darstellung: "dark" | "light" + Akzentfarbe.
     pub theme: String,
     pub accent: String,
-    /// PDF-Layout: "classic" | "modern" | "compact".
+    /// PDF-Layout: "classic" | "modern" | "compact" | "terminal".
     pub pdf_layout: String,
+    /// PDF-Farbschema: Preset-ID plus vier Rollen-Farben (Hex) —
+    /// c1 Titel/Überschriften, c2 Akzent/Band, c3 Tabellenkopf, c4 Zebra.
+    pub pdf_scheme: String,
+    pub pdf_c1: String,
+    pub pdf_c2: String,
+    pub pdf_c3: String,
+    pub pdf_c4: String,
+    /// Firmenname & Adresse im PDF-Kopf zeigen (aus = nur Logo).
+    pub pdf_show_company_header: bool,
     /// Updates beim Start automatisch installieren (statt nur Hinweis).
     pub auto_update: bool,
     /// Sicherung: automatisches lokales Backup beim Start in diesen Ordner.
@@ -96,6 +103,12 @@ impl Default for Settings {
             theme: "dark".into(),
             accent: "sky".into(),
             pdf_layout: "classic".into(),
+            pdf_scheme: "ink".into(),
+            pdf_c1: "#111827".into(),
+            pdf_c2: "#374151".into(),
+            pdf_c3: "#111827".into(),
+            pdf_c4: "#f3f4f6".into(),
+            pdf_show_company_header: true,
             auto_update: false,
             auto_backup: false,
             backup_dir: String::new(),
@@ -110,24 +123,15 @@ fn sys_locale_is_german() -> bool {
         .unwrap_or(false)
 }
 
-fn settings_path(app: &tauri::AppHandle) -> PathBuf {
-    let dir = app
-        .path()
-        .app_config_dir()
-        .unwrap_or_else(|_| PathBuf::from("."));
-    let _ = std::fs::create_dir_all(&dir);
-    dir.join("settings.json")
-}
-
-pub fn load(app: &tauri::AppHandle) -> Settings {
-    std::fs::read_to_string(settings_path(app))
+pub fn load_for(app: &tauri::AppHandle, company_id: &str) -> Settings {
+    std::fs::read_to_string(crate::companies::settings_path(app, company_id))
         .ok()
         .and_then(|s| serde_json::from_str(&s).ok())
         .unwrap_or_default()
 }
 
-pub fn store(app: &tauri::AppHandle, settings: &Settings) {
+pub fn store_for(app: &tauri::AppHandle, company_id: &str, settings: &Settings) {
     if let Ok(json) = serde_json::to_string_pretty(settings) {
-        let _ = std::fs::write(settings_path(app), json);
+        let _ = std::fs::write(crate::companies::settings_path(app, company_id), json);
     }
 }

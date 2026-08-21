@@ -111,12 +111,26 @@ const de: Content = {
     },
     {
       id: 'appearance',
-      title: 'Darstellung',
+      title: 'Design & Layout',
       body: [
-        'Einstellungen → „Darstellung“:',
-        '• Modus — Dunkel (Standard) oder Hell',
-        '• Akzentfarbe — Sky-Blau, Smaragd, Violett oder Bernstein',
-        'Beides wirkt sofort nach dem Speichern auf die ganze App.',
+        'Einstellungen → Reiter „Design/Layout“ — alles wirkt sofort, gespeichert wird erst mit „Speichern“ (Abbrechen stellt den alten Stand wieder her):',
+        '• App-Modus Dunkel/Hell und vier Akzentfarben',
+        '• PDF-Layout — Klassisch, Modern (Akzent-Kopfband), Kompakt oder Terminal (Mono-Schrift, nerdig-nüchtern)',
+        '• Farbschema — 20 Varianten von nüchtern bis mutig, jede nutzt vier Rollen-Farben: Titel, Akzent, Tabellenkopf, Zebra',
+        '• Colorpicker — jede der vier Rollen ist frei übersteuerbar; die Live-Miniatur zeigt das Ergebnis sofort',
+        '• Firmenkopf — Firmenname & Adresse im PDF-Kopf abschaltbar (dann trägt das Logo allein den Kopf)',
+        'In der PDF-Vorschau lässt sich das Layout pro Export noch einmal umschalten.',
+      ],
+    },
+    {
+      id: 'companies',
+      title: 'Mehrere Unternehmen',
+      body: [
+        'Einstellungen → Reiter „Unternehmen“: invoices verwaltet beliebig viele Unternehmen — jedes mit eigenen Belegen, Kunden, Artikeln, Nummernkreisen und eigenem Briefkopf.',
+        '• Anlegen — Namen eintippen, „Anlegen“: das neue Unternehmen startet leer und wird aktiv',
+        '• Wechseln — Auswahl im Dropdown; die App lädt sofort die Daten des gewählten Unternehmens',
+        '• Bei mehr als einem Unternehmen zeigt die Kopfzeile, welches gerade aktiv ist',
+        'Entfernen nimmt ein Unternehmen nur aus der Liste — die Daten bleiben auf der Festplatte erhalten.',
       ],
     },
     {
@@ -370,12 +384,26 @@ const en: Content = {
     },
     {
       id: 'appearance',
-      title: 'Appearance',
+      title: 'Design & layout',
       body: [
-        'Settings → “Appearance”:',
-        '• Mode — dark (default) or light',
-        '• Accent color — sky blue, emerald, violet or amber',
-        'Both apply to the whole app right after saving.',
+        'Settings → “Design/Layout” tab — everything applies instantly; “Save” makes it permanent (Cancel restores the previous state):',
+        '• App mode dark/light and four accent colors',
+        '• PDF layout — Classic, Modern (accent header band), Compact or Terminal (mono type, nerdy-sober)',
+        '• Color scheme — 20 variants from sober to bold, each using four role colors: title, accent, table head, zebra',
+        '• Color pickers — each of the four roles is freely adjustable; the live thumbnail shows the result immediately',
+        '• Company header — the name & address block in the PDF header can be turned off (the logo then carries the header alone)',
+        'In the PDF preview the layout can still be switched per export.',
+      ],
+    },
+    {
+      id: 'companies',
+      title: 'Multiple companies',
+      body: [
+        'Settings → “Company” tab: invoices manages any number of companies — each with its own documents, customers, products, number ranges and letterhead.',
+        '• Create — type a name, hit “Create”: the new company starts empty and becomes active',
+        '• Switch — pick one in the dropdown; the app loads that company’s data immediately',
+        '• With more than one company, the header shows which one is active',
+        'Removing only takes a company off the list — its data stays on disk.',
       ],
     },
     {

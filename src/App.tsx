@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { listen } from '@tauri-apps/api/event';
 import { save } from '@tauri-apps/plugin-dialog';
 import {
+  CompanyRegistry,
   Customer,
   Doc,
   DocKind,
@@ -67,6 +68,10 @@ export default function App() {
   const [previewDoc, setPreviewDoc] = useState<Doc | null>(null);
   const [templateSource, setTemplateSource] = useState<Doc | null>(null);
   const [showTemplates, setShowTemplates] = useState(false);
+  const [companies, setCompanies] = useState<CompanyRegistry | null>(null);
+  // Snapshot beim Öffnen der Einstellungen — „Abbrechen" stellt ihn wieder
+  // her, weil Änderungen live wirken.
+  const [settingsBackup, setSettingsBackup] = useState<Settings | null>(null);
   const [editCustomer, setEditCustomer] = useState<Customer | null>(null);
   const [editProduct, setEditProduct] = useState<Product | null>(null);
   const [showSettings, setShowSettings] = useState(false);
@@ -89,6 +94,7 @@ export default function App() {
     api.listCustomers().then(setCustomers).catch(() => {});
     api.listProducts().then(setProducts).catch(() => {});
     api.listTemplates().then(setTemplates).catch(() => {});
+    api.listCompanies().then(setCompanies).catch(() => {});
   }, [query]);
 
   useEffect(() => {
@@ -347,6 +353,11 @@ export default function App() {
           <span className="dot">.</span>
         </div>
         <span className="tagline">{t.tagline}</span>
+        {companies && companies.list.length > 1 && (
+          <span className="chip mini" title={t.companiesLabel}>
+            {companies.list.find((c) => c.id === companies.active)?.label || '—'}
+          </span>
+        )}
         {!editorDoc && (
           <>
             <div className="tabs">
@@ -431,7 +442,14 @@ export default function App() {
                 <IconPlus /> {t.newProduct}
               </button>
             )}
-            <button className="ghost" title={t.settings} onClick={() => setShowSettings(true)}>
+            <button
+              className="ghost"
+              title={t.settings}
+              onClick={() => {
+                setSettingsBackup(settings);
+                setShowSettings(true);
+              }}
+            >
               <IconGear />
             </button>
           </>
@@ -799,12 +817,23 @@ export default function App() {
         <SettingsModal
           settings={settings}
           t={t}
-          onClose={() => setShowSettings(false)}
+          onClose={() => {
+            // Abbrechen: Live-Änderungen zurücknehmen
+            if (settingsBackup) setSettings(settingsBackup);
+            setShowSettings(false);
+          }}
           onSave={(s) => {
             api.setSettings(s).then(() => {
               setSettings(s);
               setShowSettings(false);
             });
+          }}
+          onLive={(s) => setSettings(s)}
+          onCompanyChanged={() => {
+            api.getSettings().then(setSettings);
+            refresh();
+            setShowSettings(false);
+            showToast(t.companySwitched);
           }}
         />
       )}

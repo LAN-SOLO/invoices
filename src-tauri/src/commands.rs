@@ -351,7 +351,8 @@ pub fn import_backup(app: AppHandle, st: State<'_, AppState>, path: String) -> R
         return Err("backup-invalid".into());
     }
     *st.db.lock().unwrap() = backup.db;
-    settings::store(&app, &backup.settings);
+    let active = st.active_company.lock().unwrap().clone();
+    settings::store_for(&app, &active, &backup.settings);
     *st.settings.lock().unwrap() = backup.settings;
     st.persist();
     let _ = app.emit("db-changed", ());
@@ -406,14 +407,89 @@ pub fn get_settings(st: State<'_, AppState>) -> Settings {
 
 #[tauri::command]
 pub fn set_settings(app: AppHandle, st: State<'_, AppState>, new: Settings) {
-    settings::store(&app, &new);
+    let active = st.active_company.lock().unwrap().clone();
+    settings::store_for(&app, &active, &new);
+    // Registry-Label mit dem Firmennamen synchron halten
+    let mut registry = crate::companies::load_registry(&app);
+    if let Some(entry) = registry.list.iter_mut().find(|c| c.id == active) {
+        entry.label = new.company_name.clone();
+        crate::companies::store_registry(&app, &registry);
+    }
     *st.settings.lock().unwrap() = new;
     let _ = app.emit("db-changed", ());
 }
 
+// --- companies ---------------------------------------------------------
+
 #[tauri::command]
-pub fn data_path(app: AppHandle) -> String {
-    crate::state::db_path(&app).to_string_lossy().to_string()
+pub fn list_companies(app: AppHandle) -> crate::companies::Registry {
+    crate::companies::load_registry(&app)
+}
+
+#[tauri::command]
+pub fn add_company(
+    app: AppHandle,
+    st: State<'_, AppState>,
+    id: String,
+    label: String,
+) -> Result<(), String> {
+    let mut registry = crate::companies::load_registry(&app);
+    if registry.list.iter().any(|c| c.id == id) {
+        return Err("company-exists".into());
+    }
+    registry.list.push(crate::companies::CompanyEntry {
+        id: id.clone(),
+        label: label.clone(),
+    });
+    crate::companies::store_registry(&app, &registry);
+    // Startprofil: leere Firma mit Namen, frische Datenbank
+    let mut fresh = Settings::default();
+    fresh.company_name = label;
+    settings::store_for(&app, &id, &fresh);
+    switch_company(app, st, id)
+}
+
+/// Aktive Firma wechseln: aktuellen Stand sichern, Ziel-Profil laden.
+#[tauri::command]
+pub fn switch_company(app: AppHandle, st: State<'_, AppState>, id: String) -> Result<(), String> {
+    let mut registry = crate::companies::load_registry(&app);
+    if !registry.list.iter().any(|c| c.id == id) {
+        return Err("company-not-found".into());
+    }
+    st.persist();
+    let new_settings = settings::load_for(&app, &id);
+    let new_db_path = crate::companies::db_path(&app, &id);
+    let new_db = invoices_core::load_db(&new_db_path).unwrap_or_default();
+    *st.settings.lock().unwrap() = new_settings;
+    *st.db.lock().unwrap() = new_db;
+    *st.db_path.lock().unwrap() = new_db_path;
+    *st.active_company.lock().unwrap() = id.clone();
+    registry.active = id;
+    crate::companies::store_registry(&app, &registry);
+    let _ = app.emit("db-changed", ());
+    Ok(())
+}
+
+/// Firma aus der Registry nehmen — Dateien bleiben auf der Platte
+/// (bewusst: Belege verschwinden nie einfach).
+#[tauri::command]
+pub fn delete_company(app: AppHandle, st: State<'_, AppState>, id: String) -> Result<(), String> {
+    let active = st.active_company.lock().unwrap().clone();
+    if id == active {
+        return Err("company-active".into());
+    }
+    let mut registry = crate::companies::load_registry(&app);
+    if registry.list.len() <= 1 {
+        return Err("company-last".into());
+    }
+    registry.list.retain(|c| c.id != id);
+    crate::companies::store_registry(&app, &registry);
+    Ok(())
+}
+
+#[tauri::command]
+pub fn data_path(st: State<'_, AppState>) -> String {
+    st.db_path.lock().unwrap().to_string_lossy().to_string()
 }
 
 /// Write binary data (base64) to a path the user picked via the save dialog.
