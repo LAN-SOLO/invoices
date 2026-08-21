@@ -2,7 +2,7 @@ use crate::settings::{self, Settings};
 use crate::state::AppState;
 use base64::Engine;
 use invoices_core::{
-    doc_matches, next_number, Customer, Doc, DocKind, DocStatus, NumberFormat, Product,
+    doc_matches, next_number, Customer, Doc, DocKind, DocStatus, NumberFormat, Product, Template,
 };
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, State};
@@ -164,6 +164,9 @@ pub fn finalize_doc(app: AppHandle, st: State<'_, AppState>, id: String) -> Resu
             DocKind::Invoice => settings.invoice_prefix.clone(),
             DocKind::CreditNote => settings.credit_prefix.clone(),
             DocKind::Cancellation => settings.cancel_prefix.clone(),
+            DocKind::Quote => settings.quote_prefix.clone(),
+            DocKind::OrderConfirmation => settings.order_prefix.clone(),
+            DocKind::DeliveryNote => settings.delivery_prefix.clone(),
         };
         let doc_year = db.docs[idx].date.get(..4).and_then(|y| y.parse::<i32>().ok());
         let fmt = number_format(&settings, doc_year);
@@ -278,6 +281,122 @@ pub fn delete_doc(app: AppHandle, st: State<'_, AppState>, id: String) -> Result
     Ok(())
 }
 
+// --- templates ---------------------------------------------------------
+
+#[tauri::command]
+pub fn list_templates(st: State<'_, AppState>) -> Vec<Template> {
+    let db = st.db.lock().unwrap();
+    let mut out = db.templates.clone();
+    out.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    out
+}
+
+#[tauri::command]
+pub fn upsert_template(app: AppHandle, st: State<'_, AppState>, template: Template) {
+    {
+        let mut db = st.db.lock().unwrap();
+        if let Some(existing) = db.templates.iter_mut().find(|t| t.id == template.id) {
+            *existing = template;
+        } else {
+            db.templates.push(template);
+        }
+    }
+    st.persist();
+    let _ = app.emit("db-changed", ());
+}
+
+#[tauri::command]
+pub fn delete_template(app: AppHandle, st: State<'_, AppState>, id: String) {
+    {
+        let mut db = st.db.lock().unwrap();
+        db.templates.retain(|t| t.id != id);
+    }
+    st.persist();
+    let _ = app.emit("db-changed", ());
+}
+
+// --- backup ------------------------------------------------------------
+
+#[derive(serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct Backup {
+    app: String,
+    backup_version: u32,
+    exported_at: String,
+    db: invoices_core::Db,
+    settings: Settings,
+}
+
+/// Vollständiges Backup (Belege, Kunden, Artikel, Vorlagen, Zähler,
+/// Einstellungen) als eine JSON-Datei.
+#[tauri::command]
+pub fn export_backup(st: State<'_, AppState>, path: String) -> Result<(), String> {
+    let backup = Backup {
+        app: "invoices".into(),
+        backup_version: 1,
+        exported_at: chrono::Local::now().to_rfc3339(),
+        db: st.db.lock().unwrap().clone(),
+        settings: st.settings.lock().unwrap().clone(),
+    };
+    let json = serde_json::to_string_pretty(&backup).map_err(|e| e.to_string())?;
+    std::fs::write(&path, json).map_err(|e| e.to_string())
+}
+
+/// Backup wiederherstellen — ersetzt ALLE Daten und Einstellungen.
+#[tauri::command]
+pub fn import_backup(app: AppHandle, st: State<'_, AppState>, path: String) -> Result<(), String> {
+    let raw = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
+    let backup: Backup = serde_json::from_str(&raw).map_err(|_| "backup-invalid".to_string())?;
+    if backup.app != "invoices" {
+        return Err("backup-invalid".into());
+    }
+    *st.db.lock().unwrap() = backup.db;
+    settings::store(&app, &backup.settings);
+    *st.settings.lock().unwrap() = backup.settings;
+    st.persist();
+    let _ = app.emit("db-changed", ());
+    Ok(())
+}
+
+/// Automatisches Backup beim Start (settings.auto_backup): schreibt in den
+/// Backup-Ordner und behält die letzten 10 Stände.
+pub fn auto_backup(st: &AppState) {
+    let settings = st.settings.lock().unwrap().clone();
+    if !settings.auto_backup || settings.backup_dir.trim().is_empty() {
+        return;
+    }
+    let dir = std::path::PathBuf::from(settings.backup_dir.trim());
+    if std::fs::create_dir_all(&dir).is_err() {
+        return;
+    }
+    let backup = Backup {
+        app: "invoices".into(),
+        backup_version: 1,
+        exported_at: chrono::Local::now().to_rfc3339(),
+        db: st.db.lock().unwrap().clone(),
+        settings,
+    };
+    let stamp = chrono::Local::now().format("%Y%m%d-%H%M%S");
+    if let Ok(json) = serde_json::to_string_pretty(&backup) {
+        let _ = std::fs::write(dir.join(format!("invoices-backup-{stamp}.json")), json);
+    }
+    // aufräumen: nur die 10 neuesten behalten
+    if let Ok(entries) = std::fs::read_dir(&dir) {
+        let mut backups: Vec<_> = entries
+            .flatten()
+            .filter(|e| {
+                let name = e.file_name().to_string_lossy().to_string();
+                name.starts_with("invoices-backup-") && name.ends_with(".json")
+            })
+            .collect();
+        backups.sort_by_key(|e| e.file_name());
+        while backups.len() > 10 {
+            let oldest = backups.remove(0);
+            let _ = std::fs::remove_file(oldest.path());
+        }
+    }
+}
+
 // --- settings & files --------------------------------------------------
 
 #[tauri::command]
@@ -352,6 +471,12 @@ pub fn einvoice_xml(st: State<'_, AppState>, id: String) -> Result<EInvoiceDto, 
     };
     if doc.status == DocStatus::Draft {
         return Err("doc-draft".into());
+    }
+    if !matches!(
+        doc.kind,
+        DocKind::Invoice | DocKind::CreditNote | DocKind::Cancellation
+    ) {
+        return Err("not-einvoiceable".into());
     }
     let settings = st.settings.lock().unwrap().clone();
     let seller = invoices_core::einvoice::Seller {

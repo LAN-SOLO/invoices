@@ -4,8 +4,10 @@ import { save } from '@tauri-apps/plugin-dialog';
 import {
   Customer,
   Doc,
+  DocKind,
   Product,
   Settings,
+  Template,
   UpdateInfo,
   addDaysIso,
   api,
@@ -16,18 +18,28 @@ import {
   totals,
 } from './api';
 import { dicts, Lang } from './i18n';
+import { Dashboard } from './components/Dashboard';
 import { DocEditor } from './components/DocEditor';
-import { CustomerModal, ProductModal } from './components/Modals';
+import {
+  CustomerModal,
+  ProductModal,
+  SaveTemplateModal,
+  TemplatesModal,
+} from './components/Modals';
+import { PdfPreview } from './components/PdfPreview';
 import { SettingsModal } from './components/SettingsModal';
 import { Help } from './components/Help';
 import { buildPdf, bytesToBase64 } from './pdf';
 import { embedZugferd } from './zugferd';
 import {
+  IconArrowRight,
   IconBox,
   IconCancel,
   IconCheck,
   IconEInvoice,
   IconEdit,
+  IconEye,
+  IconGauge,
   IconGear,
   IconInvoice,
   IconPdf,
@@ -37,20 +49,24 @@ import {
   IconXml,
 } from './icons';
 
-type Tab = 'docs' | 'customers' | 'products';
+type Tab = 'dashboard' | 'docs' | 'customers' | 'products';
 type DocFilter = 'all' | 'draft' | 'open' | 'overdue' | 'paid' | 'cancelled';
 
 const uid = () => crypto.randomUUID();
 
 export default function App() {
   const [settings, setSettings] = useState<Settings | null>(null);
-  const [tab, setTab] = useState<Tab>('docs');
+  const [tab, setTab] = useState<Tab>('dashboard');
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState<DocFilter>('all');
   const [docs, setDocs] = useState<Doc[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
+  const [templates, setTemplates] = useState<Template[]>([]);
   const [editorDoc, setEditorDoc] = useState<Doc | null>(null);
+  const [previewDoc, setPreviewDoc] = useState<Doc | null>(null);
+  const [templateSource, setTemplateSource] = useState<Doc | null>(null);
+  const [showTemplates, setShowTemplates] = useState(false);
   const [editCustomer, setEditCustomer] = useState<Customer | null>(null);
   const [editProduct, setEditProduct] = useState<Product | null>(null);
   const [showSettings, setShowSettings] = useState(false);
@@ -72,6 +88,7 @@ export default function App() {
     api.listDocs(query).then(setDocs).catch(() => {});
     api.listCustomers().then(setCustomers).catch(() => {});
     api.listProducts().then(setProducts).catch(() => {});
+    api.listTemplates().then(setTemplates).catch(() => {});
   }, [query]);
 
   useEffect(() => {
@@ -109,10 +126,9 @@ export default function App() {
     };
   }, [refresh]);
 
-  const newDoc = (kind: 'invoice' | 'creditnote') => {
-    if (!settings) return;
+  const blankDoc = (kind: DocKind, s: Settings): Doc => {
     const date = todayIso();
-    setEditorDoc({
+    return {
       id: uid(),
       kind,
       number: null,
@@ -120,16 +136,54 @@ export default function App() {
       customerName: '',
       customerAddress: '',
       date,
-      dueDate: kind === 'invoice' ? addDaysIso(date, settings.paymentTermsDays) : date,
+      dueDate:
+        kind === 'invoice' || kind === 'quote'
+          ? addDaysIso(date, s.paymentTermsDays)
+          : date,
       items: [],
       status: 'draft',
-      smallBusiness: settings.smallBusiness,
-      intro: kind === 'invoice' ? settings.defaultIntro : '',
+      smallBusiness: s.smallBusiness,
+      intro: kind === 'invoice' ? s.defaultIntro : '',
       notes: '',
       paidAt: null,
       relatedId: null,
       createdAt: new Date().toISOString(),
+    };
+  };
+
+  const newDoc = (kind: DocKind) => {
+    if (!settings) return;
+    setEditorDoc(blankDoc(kind, settings));
+  };
+
+  const newDocFromTemplate = (template: Template) => {
+    if (!settings) return;
+    const base = blankDoc(template.kind, settings);
+    setEditorDoc({
+      ...base,
+      items: template.items.map((i) => ({ ...i })),
+      intro: template.intro,
+      notes: template.notes,
     });
+    setShowTemplates(false);
+  };
+
+  /// Angebot/AB als Rechnungs-Entwurf übernehmen — Positionen, Kunde und
+  /// Texte wandern mit, der neue Beleg verweist auf seine Herkunft.
+  const convertToInvoice = (doc: Doc) => {
+    if (!settings) return;
+    const base = blankDoc('invoice', settings);
+    setEditorDoc({
+      ...base,
+      customerId: doc.customerId,
+      customerName: doc.customerName,
+      customerAddress: doc.customerAddress,
+      items: doc.items.map((i) => ({ ...i })),
+      intro: doc.intro,
+      smallBusiness: doc.smallBusiness,
+      relatedId: doc.id,
+    });
+    showToast(t.converted);
   };
 
   const saveDraft = async (doc: Doc, silent = false): Promise<boolean> => {
@@ -251,7 +305,7 @@ export default function App() {
   });
 
   const openCents = docs
-    .filter((doc) => doc.status === 'open')
+    .filter((doc) => doc.kind === 'invoice' && doc.status === 'open')
     .reduce((sum, doc) => sum + totals(doc.items, doc.smallBusiness).grossCents, 0);
 
   const filters: { key: DocFilter; label: string }[] = [
@@ -271,12 +325,19 @@ export default function App() {
     return <span className="chip mini warn">{t.statusOpen}</span>;
   };
 
-  const kindLabel = (doc: Doc) =>
-    doc.kind === 'creditnote'
-      ? t.kindCreditNote
-      : doc.kind === 'cancellation'
-        ? t.kindCancellation
-        : t.kindInvoice;
+  const kindLabels: Record<DocKind, string> = {
+    invoice: t.kindInvoice,
+    creditnote: t.kindCreditNote,
+    cancellation: t.kindCancellation,
+    quote: t.kindQuote,
+    orderconfirmation: t.kindOrder,
+    deliverynote: t.kindDelivery,
+  };
+  const kindLabel = (doc: Doc) => kindLabels[doc.kind];
+  const canEInvoice = (doc: Doc) =>
+    doc.kind === 'invoice' || doc.kind === 'creditnote' || doc.kind === 'cancellation';
+  const relatedNumberOf = (doc: Doc) =>
+    doc.relatedId ? docs.find((x) => x.id === doc.relatedId)?.number ?? null : null;
 
   return (
     <div className="app">
@@ -289,6 +350,12 @@ export default function App() {
         {!editorDoc && (
           <>
             <div className="tabs">
+              <button
+                className={tab === 'dashboard' ? 'active' : ''}
+                onClick={() => setTab('dashboard')}
+              >
+                <IconGauge /> {t.tabDashboard}
+              </button>
               <button className={tab === 'docs' ? 'active' : ''} onClick={() => setTab('docs')}>
                 <IconInvoice /> {t.tabDocs}
               </button>
@@ -305,14 +372,18 @@ export default function App() {
                 <IconBox /> {t.tabProducts}
               </button>
             </div>
-            <input
-              className="grow"
-              type="text"
-              placeholder={t.search}
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-            />
-            {tab === 'docs' && (
+            {tab !== 'dashboard' ? (
+              <input
+                className="grow"
+                type="text"
+                placeholder={t.search}
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+              />
+            ) : (
+              <span className="grow" />
+            )}
+            {(tab === 'docs' || tab === 'dashboard') && (
               <button className="primary" onClick={() => newDoc('invoice')}>
                 <IconPlus /> {t.newInvoice}
               </button>
@@ -330,6 +401,13 @@ export default function App() {
                     notes: '',
                     buyerReference: '',
                     country: '',
+                    contact: '',
+                    street: '',
+                    postcode: '',
+                    city: '',
+                    phone: '',
+                    website: '',
+                    customerNumber: '',
                   })
                 }
               >
@@ -360,6 +438,15 @@ export default function App() {
         )}
       </div>
 
+      {editorDoc ? null : tab === 'dashboard' ? (
+        <Dashboard
+          docs={docs}
+          customers={customers}
+          t={t}
+          lang={lang}
+          onOpenDoc={(doc) => setEditorDoc(doc)}
+        />
+      ) : null}
       {editorDoc ? (
         <DocEditor
           doc={editorDoc}
@@ -376,6 +463,8 @@ export default function App() {
           }}
           onFinalize={finalize}
           onPdf={exportPdf}
+          onPreview={(d) => setPreviewDoc(d)}
+          onSaveTemplate={(d) => setTemplateSource(d)}
         />
       ) : tab === 'docs' ? (
         <>
@@ -389,8 +478,22 @@ export default function App() {
                 {f.label}
               </button>
             ))}
-            <button className="chip alt" onClick={() => newDoc('creditnote')}>
-              <IconPlus /> {t.newCreditNote}
+            <select
+              className="kindselect"
+              value=""
+              onChange={(e) => {
+                if (e.target.value) newDoc(e.target.value as DocKind);
+                e.target.value = '';
+              }}
+            >
+              <option value="">{t.moreKinds}</option>
+              <option value="quote">{t.newQuote}</option>
+              <option value="orderconfirmation">{t.newOrder}</option>
+              <option value="deliverynote">{t.newDelivery}</option>
+              <option value="creditnote">{t.newCreditNote}</option>
+            </select>
+            <button className="chip" onClick={() => setShowTemplates(true)}>
+              {t.fromTemplate}
             </button>
             <span className="count">
               {docs.length} {t.docsCount} · {fmtMoney(openCents, lang)} {t.openSum}
@@ -434,24 +537,44 @@ export default function App() {
                         <td className="num mono">{fmtMoney(sums.grossCents, lang)}</td>
                         <td>{statusChip(doc)}</td>
                         <td className="actions" onClick={(e) => e.stopPropagation()}>
+                          <button
+                            className="icon"
+                            title={t.actPreview}
+                            onClick={() => setPreviewDoc(doc)}
+                          >
+                            <IconEye />
+                          </button>
                           {doc.status !== 'draft' && (
                             <>
                               <button className="icon" title={t.actPdf} onClick={() => exportPdf(doc)}>
                                 <IconPdf />
                               </button>
-                              <button
-                                className="icon"
-                                title={t.actZugferd}
-                                onClick={() => exportZugferd(doc)}
-                              >
-                                <IconEInvoice />
-                              </button>
-                              <button className="icon" title={t.actXml} onClick={() => exportXml(doc)}>
-                                <IconXml />
-                              </button>
+                              {canEInvoice(doc) && (
+                                <>
+                                  <button
+                                    className="icon"
+                                    title={t.actZugferd}
+                                    onClick={() => exportZugferd(doc)}
+                                  >
+                                    <IconEInvoice />
+                                  </button>
+                                  <button className="icon" title={t.actXml} onClick={() => exportXml(doc)}>
+                                    <IconXml />
+                                  </button>
+                                </>
+                              )}
+                              {(doc.kind === 'quote' || doc.kind === 'orderconfirmation') && (
+                                <button
+                                  className="icon"
+                                  title={t.actConvertInvoice}
+                                  onClick={() => convertToInvoice(doc)}
+                                >
+                                  <IconArrowRight />
+                                </button>
+                              )}
                             </>
                           )}
-                          {doc.status === 'open' && (
+                          {doc.kind === 'invoice' && doc.status === 'open' && (
                             <button
                               className="icon"
                               title={t.actMarkPaid}
@@ -460,7 +583,7 @@ export default function App() {
                               <IconCheck />
                             </button>
                           )}
-                          {doc.status === 'paid' && (
+                          {doc.kind === 'invoice' && doc.status === 'paid' && (
                             <button
                               className="icon"
                               title={t.actMarkUnpaid}
@@ -551,7 +674,7 @@ export default function App() {
             </table>
           )}
         </div>
-      ) : (
+      ) : tab === 'products' ? (
         <div className="list">
           {products.length === 0 && <div className="empty">{t.emptyProducts}</div>}
           {products.length > 0 && (
@@ -596,7 +719,7 @@ export default function App() {
             </table>
           )}
         </div>
-      )}
+      ) : null}
 
       {editCustomer && (
         <CustomerModal
@@ -624,6 +747,51 @@ export default function App() {
               showToast(t.saved);
             });
           }}
+        />
+      )}
+
+      {previewDoc && settings && (
+        <PdfPreview
+          doc={previewDoc}
+          settings={settings}
+          relatedNumber={relatedNumberOf(previewDoc)}
+          t={t}
+          lang={lang}
+          onClose={() => setPreviewDoc(null)}
+          showToast={showToast}
+        />
+      )}
+
+      {templateSource && (
+        <SaveTemplateModal
+          t={t}
+          onClose={() => setTemplateSource(null)}
+          onSave={(name) => {
+            api
+              .upsertTemplate({
+                id: uid(),
+                name,
+                kind: templateSource.kind,
+                items: templateSource.items.map((i) => ({ ...i })),
+                intro: templateSource.intro,
+                notes: templateSource.notes,
+              })
+              .then(() => {
+                setTemplateSource(null);
+                showToast(t.templateSaved);
+              });
+          }}
+        />
+      )}
+
+      {showTemplates && (
+        <TemplatesModal
+          templates={templates}
+          kindLabel={(kind) => kindLabels[kind]}
+          t={t}
+          onClose={() => setShowTemplates(false)}
+          onUse={newDocFromTemplate}
+          onDelete={(id) => api.deleteTemplate(id)}
         />
       )}
 

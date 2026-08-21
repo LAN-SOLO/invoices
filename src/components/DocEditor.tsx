@@ -6,6 +6,7 @@ import {
   Product,
   Settings,
   addDaysIso,
+  api,
   centsToInput,
   fmtMoney,
   lineTotalCents,
@@ -14,6 +15,7 @@ import {
 } from '../api';
 import { Dict, Lang } from '../i18n';
 import { IconPlus, IconTrash } from '../icons';
+import { CustomerModal } from './Modals';
 
 // Beleg-Editor: Entwürfe sind voll editierbar, festgeschriebene Belege
 // öffnen als read-only Ansicht (GoBD-Denke — korrigiert wird per Storno).
@@ -29,6 +31,8 @@ interface Props {
   onSaveDraft: (doc: Doc) => void;
   onFinalize: (doc: Doc) => void;
   onPdf: (doc: Doc) => void;
+  onPreview: (doc: Doc) => void;
+  onSaveTemplate: (doc: Doc) => void;
 }
 
 export function DocEditor({
@@ -42,9 +46,12 @@ export function DocEditor({
   onSaveDraft,
   onFinalize,
   onPdf,
+  onPreview,
+  onSaveTemplate,
 }: Props) {
   const readOnly = doc.status !== 'draft';
   const [d, setD] = useState<Doc>({ ...doc, items: doc.items.map((i) => ({ ...i })) });
+  const [newCust, setNewCust] = useState<Customer | null>(null);
   // Mengen/Preise als Strings editieren — geparst wird bei Blur/Save.
   const [qtyStr, setQtyStr] = useState<string[]>(
     doc.items.map((i) => String(i.quantity).replace('.', lang === 'de' ? ',' : '.'))
@@ -108,12 +115,21 @@ export function DocEditor({
     }));
   };
 
+  const kindLabel: Record<Doc['kind'], string> = {
+    invoice: t.kindInvoice,
+    creditnote: t.kindCreditNote,
+    cancellation: t.kindCancellation,
+    quote: t.kindQuote,
+    orderconfirmation: t.kindOrder,
+    deliverynote: t.kindDelivery,
+  };
   const title =
     doc.status === 'draft'
-      ? d.kind === 'creditnote'
-        ? t.editorNewCreditNote
-        : t.editorNewInvoice
-      : `${d.kind === 'creditnote' ? t.kindCreditNote : d.kind === 'cancellation' ? t.kindCancellation : t.kindInvoice} ${d.number ?? ''}`;
+      ? kindLabel[d.kind]
+      : `${kindLabel[d.kind]} ${d.number ?? ''}`;
+  // Fällig/Gültig nur dort, wo es Bedeutung hat
+  const dueLabel =
+    d.kind === 'invoice' ? t.dueDate : d.kind === 'quote' ? t.validUntil : null;
 
   return (
     <div className="editor-wrap">
@@ -124,6 +140,9 @@ export function DocEditor({
         <span className="editor-title">{title}</span>
         {doc.status === 'draft' && <span className="chip mini">{t.editorDraft}</span>}
         <span className="spacer" />
+        <button className="ghost" onClick={() => onPreview(d)}>
+          {t.actPreview}
+        </button>
         {readOnly && (
           <button className="primary" onClick={() => onPdf(d)}>
             {t.actPdf}
@@ -135,18 +154,46 @@ export function DocEditor({
         <div className="editor-grid">
           <label className="field">
             <span>{t.customer}</span>
-            <select
-              disabled={readOnly}
-              value={d.customerId}
-              onChange={(e) => pickCustomer(e.target.value)}
-            >
-              <option value="">{t.chooseCustomer}</option>
-              {customers.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                </option>
-              ))}
-            </select>
+            <div className="row2">
+              <select
+                disabled={readOnly}
+                value={d.customerId}
+                onChange={(e) => pickCustomer(e.target.value)}
+              >
+                <option value="">{t.chooseCustomer}</option>
+                {customers.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                  </option>
+                ))}
+              </select>
+              {!readOnly && (
+                <button
+                  title={t.newCustomer}
+                  onClick={() =>
+                    setNewCust({
+                      id: crypto.randomUUID(),
+                      name: '',
+                      address: '',
+                      email: '',
+                      vatId: '',
+                      notes: '',
+                      buyerReference: '',
+                      country: '',
+                      contact: '',
+                      street: '',
+                      postcode: '',
+                      city: '',
+                      phone: '',
+                      website: '',
+                      customerNumber: '',
+                    })
+                  }
+                >
+                  <IconPlus />
+                </button>
+              )}
+            </div>
           </label>
           <label className="field">
             <span>{t.date}</span>
@@ -160,22 +207,26 @@ export function DocEditor({
                   ...prev,
                   date,
                   dueDate:
-                    prev.kind === 'invoice'
+                    prev.kind === 'invoice' || prev.kind === 'quote'
                       ? addDaysIso(date, settings.paymentTermsDays)
                       : prev.dueDate,
                 }));
               }}
             />
           </label>
-          <label className="field">
-            <span>{t.dueDate}</span>
-            <input
-              type="date"
-              disabled={readOnly || d.kind !== 'invoice'}
-              value={d.dueDate}
-              onChange={(e) => set('dueDate', e.target.value)}
-            />
-          </label>
+          {dueLabel ? (
+            <label className="field">
+              <span>{dueLabel}</span>
+              <input
+                type="date"
+                disabled={readOnly}
+                value={d.dueDate}
+                onChange={(e) => set('dueDate', e.target.value)}
+              />
+            </label>
+          ) : (
+            <span />
+          )}
         </div>
 
         {d.customerAddress && (
@@ -350,6 +401,9 @@ export function DocEditor({
           <>
             <div className="note">{t.finalizeHint}</div>
             <div className="btnrow">
+              <button className="ghost" onClick={() => onSaveTemplate(d)}>
+                {t.saveAsTemplate}
+              </button>
               <button onClick={() => onSaveDraft(d)}>{t.saveDraft}</button>
               <button className="primary" onClick={() => onFinalize(d)}>
                 {t.finalize}
@@ -358,6 +412,25 @@ export function DocEditor({
           </>
         )}
       </div>
+
+      {newCust && (
+        <CustomerModal
+          customer={newCust}
+          t={t}
+          onClose={() => setNewCust(null)}
+          onSave={(c) => {
+            api.upsertCustomer(c).then(() => {
+              setD((prev) => ({
+                ...prev,
+                customerId: c.id,
+                customerName: c.name,
+                customerAddress: c.address,
+              }));
+              setNewCust(null);
+            });
+          }}
+        />
+      )}
     </div>
   );
 }

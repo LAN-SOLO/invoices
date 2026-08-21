@@ -94,6 +94,26 @@ export const IconX = (p: P) => (
   </S>
 );
 
+export const IconGauge = (p: P) => (
+  <S {...p}>
+    <path d="M12 20a8 8 0 1 1 8-8" />
+    <path d="M12 12l5-3M20 16h.01M18 20h.01" />
+  </S>
+);
+
+export const IconEye = (p: P) => (
+  <S {...p}>
+    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8Z" />
+    <circle cx="12" cy="12" r="3" />
+  </S>
+);
+
+export const IconArrowRight = (p: P) => (
+  <S {...p}>
+    <path d="M5 12h14M13 6l6 6-6 6" />
+  </S>
+);
+
 export const IconXml = (p: P) => (
   <S {...p}>
     <path d="M8 6 3 12l5 6M16 6l5 6-5 6M13 4l-3 16" />

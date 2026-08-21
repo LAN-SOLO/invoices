@@ -1,6 +1,6 @@
 [package]
 name = "invoices"
-version = "0.2.0"
+version = "0.3.0"
 description = "invoices — Rechnungstool für kleine Unternehmen: Kunden, Artikel, Rechnungen, PDF"
 edition = "2021"
 license = "MIT"

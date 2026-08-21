@@ -120,11 +120,14 @@ fn party_xml(role: &str, name: &str, address: &str, country: &str, vat_id: &str)
 }
 
 /// Belegtyp nach UNTDID 1001: Rechnung 380, Gutschrift 381, Storno 384.
+/// Angebote/AB/Lieferscheine sind keine E-Rechnungen — der Command weist
+/// sie ab, bevor es hierher kommt.
 fn type_code(kind: DocKind) -> &'static str {
     match kind {
         DocKind::Invoice => "380",
         DocKind::CreditNote => "381",
         DocKind::Cancellation => "384",
+        DocKind::Quote | DocKind::OrderConfirmation | DocKind::DeliveryNote => "380",
     }
 }
 

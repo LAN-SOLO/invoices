@@ -25,6 +25,15 @@ pub struct Customer {
     pub buyer_reference: String,
     /// ISO-3166-Ländercode; leer = "DE".
     pub country: String,
+    // Strukturierte Stammdaten (seit 0.3.0) — `address` bleibt als
+    // zusammengesetzte Fassung für PDF-Snapshot und Alt-Daten erhalten.
+    pub contact: String,
+    pub street: String,
+    pub postcode: String,
+    pub city: String,
+    pub phone: String,
+    pub website: String,
+    pub customer_number: String,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -58,6 +67,11 @@ pub enum DocKind {
     Invoice,
     CreditNote,
     Cancellation,
+    Quote,
+    #[serde(rename = "orderconfirmation")]
+    OrderConfirmation,
+    #[serde(rename = "deliverynote")]
+    DeliveryNote,
 }
 
 impl Default for DocKind {
@@ -107,12 +121,25 @@ pub struct Doc {
     pub created_at: String,
 }
 
+/// Wiederverwendbare Beleg-Vorlage: Positionen + Texte, ohne Kunde.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct Template {
+    pub id: String,
+    pub name: String,
+    pub kind: DocKind,
+    pub items: Vec<LineItem>,
+    pub intro: String,
+    pub notes: String,
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct Db {
     pub customers: Vec<Customer>,
     pub products: Vec<Product>,
     pub docs: Vec<Doc>,
+    pub templates: Vec<Template>,
     /// Sequential counters keyed by "<prefix>-<year>", e.g. "RE-2026".
     pub counters: HashMap<String, u32>,
 }

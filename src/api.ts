@@ -1,6 +1,12 @@
 import { invoke } from '@tauri-apps/api/core';
 
-export type DocKind = 'invoice' | 'creditnote' | 'cancellation';
+export type DocKind =
+  | 'invoice'
+  | 'creditnote'
+  | 'cancellation'
+  | 'quote'
+  | 'orderconfirmation'
+  | 'deliverynote';
 export type DocStatus = 'draft' | 'open' | 'paid' | 'cancelled';
 
 export interface Customer {
@@ -14,6 +20,22 @@ export interface Customer {
   buyerReference: string;
   /** ISO-3166-Ländercode; leer = DE. */
   country: string;
+  contact: string;
+  street: string;
+  postcode: string;
+  city: string;
+  phone: string;
+  website: string;
+  customerNumber: string;
+}
+
+export interface Template {
+  id: string;
+  name: string;
+  kind: DocKind;
+  items: LineItem[];
+  intro: string;
+  notes: string;
 }
 
 export interface Product {
@@ -71,6 +93,9 @@ export interface Settings {
   invoicePrefix: string;
   creditPrefix: string;
   cancelPrefix: string;
+  quotePrefix: string;
+  orderPrefix: string;
+  deliveryPrefix: string;
   numberIncludeYear: boolean;
   numberDigits: number;
   numberSeparator: string;
@@ -80,7 +105,10 @@ export interface Settings {
   defaultIntro: string;
   theme: 'dark' | 'light';
   accent: 'sky' | 'emerald' | 'violet' | 'amber';
+  pdfLayout: 'classic' | 'modern' | 'compact';
   autoUpdate: boolean;
+  autoBackup: boolean;
+  backupDir: string;
 }
 
 export interface EInvoice {
@@ -114,6 +142,11 @@ export const api = {
     invoke<void>('write_file', { path, dataBase64 }),
   getLogo: () => invoke<string | null>('get_logo'),
   einvoiceXml: (id: string) => invoke<EInvoice>('einvoice_xml', { id }),
+  listTemplates: () => invoke<Template[]>('list_templates'),
+  upsertTemplate: (template: Template) => invoke<void>('upsert_template', { template }),
+  deleteTemplate: (id: string) => invoke<void>('delete_template', { id }),
+  exportBackup: (path: string) => invoke<void>('export_backup', { path }),
+  importBackup: (path: string) => invoke<void>('import_backup', { path }),
   checkUpdate: () => invoke<UpdateInfo | null>('check_update'),
   installUpdate: () => invoke<void>('install_update'),
 };

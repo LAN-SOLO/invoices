@@ -35,6 +35,9 @@ pub struct Settings {
     pub invoice_prefix: String,
     pub credit_prefix: String,
     pub cancel_prefix: String,
+    pub quote_prefix: String,
+    pub order_prefix: String,
+    pub delivery_prefix: String,
     /// Nummernkreis-Layout: Jahr einbeziehen (Zähler pro Jahr) oder
     /// fortlaufend; Trennzeichen und Stellenzahl.
     pub number_include_year: bool,
@@ -51,8 +54,13 @@ pub struct Settings {
     /// Darstellung: "dark" | "light" + Akzentfarbe.
     pub theme: String,
     pub accent: String,
+    /// PDF-Layout: "classic" | "modern" | "compact".
+    pub pdf_layout: String,
     /// Updates beim Start automatisch installieren (statt nur Hinweis).
     pub auto_update: bool,
+    /// Sicherung: automatisches lokales Backup beim Start in diesen Ordner.
+    pub auto_backup: bool,
+    pub backup_dir: String,
 }
 
 impl Default for Settings {
@@ -75,6 +83,9 @@ impl Default for Settings {
             invoice_prefix: "RE".into(),
             credit_prefix: "GS".into(),
             cancel_prefix: "ST".into(),
+            quote_prefix: "AN".into(),
+            order_prefix: "AB".into(),
+            delivery_prefix: "LS".into(),
             number_include_year: true,
             number_digits: 4,
             number_separator: "-".into(),
@@ -84,7 +95,10 @@ impl Default for Settings {
             default_intro: String::new(),
             theme: "dark".into(),
             accent: "sky".into(),
+            pdf_layout: "classic".into(),
             auto_update: false,
+            auto_backup: false,
+            backup_dir: String::new(),
         }
     }
 }

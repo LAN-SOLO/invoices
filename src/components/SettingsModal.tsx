@@ -1,9 +1,9 @@
 import { useState } from 'react';
-import { open } from '@tauri-apps/plugin-dialog';
+import { open, save } from '@tauri-apps/plugin-dialog';
 import { api, numberPreview, Settings, UpdateInfo } from '../api';
 import { Dict } from '../i18n';
 
-const APP_VERSION = '0.2.0';
+const APP_VERSION = '0.3.0';
 
 export function SettingsModal({
   settings,
@@ -20,6 +20,41 @@ export function SettingsModal({
   const [updState, setUpdState] = useState<'idle' | 'checking' | 'none' | 'error'>('idle');
   const [update, setUpdate] = useState<UpdateInfo | null>(null);
   const [installing, setInstalling] = useState(false);
+  const [backupMsg, setBackupMsg] = useState('');
+
+  const backupNow = async () => {
+    const stamp = new Date().toISOString().slice(0, 10);
+    const path = await save({
+      defaultPath: `invoices-backup-${stamp}.json`,
+      filters: [{ name: 'JSON', extensions: ['json'] }],
+    });
+    if (!path) return;
+    try {
+      await api.exportBackup(path);
+      setBackupMsg(t.backupDone);
+    } catch (e) {
+      setBackupMsg(String(e));
+    }
+  };
+
+  const restoreBackup = async () => {
+    const picked = await open({ filters: [{ name: 'JSON', extensions: ['json'] }] });
+    if (typeof picked !== 'string') return;
+    if (!window.confirm(t.restoreConfirm)) return;
+    try {
+      await api.importBackup(picked);
+      setBackupMsg(t.restoreDone);
+      // Einstellungen wurden mit-restauriert — Modal-Zustand wäre veraltet
+      api.getSettings().then((fresh) => setS(fresh));
+    } catch {
+      setBackupMsg(t.restoreFailed);
+    }
+  };
+
+  const pickBackupDir = async () => {
+    const picked = await open({ directory: true });
+    if (typeof picked === 'string') set('backupDir', picked);
+  };
 
   const set = <K extends keyof Settings>(key: K, value: Settings[K]) =>
     setS((prev) => ({ ...prev, [key]: value }));
@@ -89,6 +124,17 @@ export function SettingsModal({
               <option value="emerald">{t.accentEmerald}</option>
               <option value="violet">{t.accentViolet}</option>
               <option value="amber">{t.accentAmber}</option>
+            </select>
+          </label>
+          <label className="field grow1">
+            <span>{t.pdfLayoutLabel}</span>
+            <select
+              value={s.pdfLayout}
+              onChange={(e) => set('pdfLayout', e.target.value as Settings['pdfLayout'])}
+            >
+              <option value="classic">{t.layoutClassic}</option>
+              <option value="modern">{t.layoutModern}</option>
+              <option value="compact">{t.layoutCompact}</option>
             </select>
           </label>
         </div>
@@ -205,6 +251,32 @@ export function SettingsModal({
             />
           </label>
         </div>
+        <div className="row3">
+          <label className="field">
+            <span>{t.quotePrefix}</span>
+            <input
+              type="text"
+              value={s.quotePrefix}
+              onChange={(e) => set('quotePrefix', e.target.value.toUpperCase())}
+            />
+          </label>
+          <label className="field">
+            <span>{t.orderPrefix}</span>
+            <input
+              type="text"
+              value={s.orderPrefix}
+              onChange={(e) => set('orderPrefix', e.target.value.toUpperCase())}
+            />
+          </label>
+          <label className="field">
+            <span>{t.deliveryPrefix}</span>
+            <input
+              type="text"
+              value={s.deliveryPrefix}
+              onChange={(e) => set('deliveryPrefix', e.target.value.toUpperCase())}
+            />
+          </label>
+        </div>
 
         <div className="sep" />
         <div className="fieldlabel">{t.secNumbering}</div>
@@ -289,6 +361,45 @@ export function SettingsModal({
             onChange={(e) => set('pdfFooter', e.target.value)}
           />
         </label>
+
+        <div className="sep" />
+        <div className="fieldlabel">{t.secSecurity}</div>
+        <div className="note">{t.backupNote}</div>
+        <div className="row2" style={{ marginBottom: 10 }}>
+          <button onClick={backupNow}>{t.backupNow}</button>
+          <button onClick={restoreBackup}>{t.backupRestore}</button>
+          {backupMsg && <span className="dim">{backupMsg}</span>}
+        </div>
+        <label className="check">
+          <input
+            type="checkbox"
+            checked={s.autoBackup}
+            onChange={(e) => set('autoBackup', e.target.checked)}
+          />
+          {t.autoBackupLabel}
+        </label>
+        {s.autoBackup && (
+          <label className="field">
+            <span>{t.backupDir}</span>
+            <div className="row2">
+              <input
+                type="text"
+                value={s.backupDir}
+                onChange={(e) => set('backupDir', e.target.value)}
+              />
+              <button onClick={pickBackupDir}>{t.chooseLogo}</button>
+            </div>
+          </label>
+        )}
+        <div className="billed-row">
+          <span className="chip mini">{t.billedSoon}</span> {t.cloudBackup}
+        </div>
+        <div className="billed-row">
+          <span className="chip mini">{t.billedSoon}</span> {t.scheduleBackup}
+        </div>
+        <div className="billed-row">
+          <span className="chip mini">{t.billedSoon}</span> {t.encryptedBackup}
+        </div>
 
         <div className="sep" />
         <div className="fieldlabel">{t.updates}</div>

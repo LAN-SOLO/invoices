@@ -170,12 +170,45 @@ const de: Content = {
       ],
     },
     {
+      id: 'chain',
+      title: 'Belegkette: Angebot → Rechnung',
+      body: [
+        'Neben Rechnungen und Gutschriften gibt es Angebote, Auftragsbestätigungen und Lieferscheine — über „Weitere Belegart …“ in der Filterleiste, jede mit eigenem Nummernkreis (AN/AB/LS).',
+        '• Angebote haben ein „Gültig bis“-Datum statt einer Fälligkeit',
+        '• Lieferscheine kommen ohne Preise — auf dem PDF stehen nur Positionen und Mengen',
+        '• Festgeschriebene Angebote und Auftragsbestätigungen haben eine Pfeil-Aktion: „Als Rechnung übernehmen“ — Kunde, Positionen und Texte wandern in einen neuen Rechnungs-Entwurf, der Beleg kennt seine Herkunft',
+        'So wird aus einem Angebot in Sekunden eine Rechnung, ohne etwas doppelt zu tippen.',
+      ],
+    },
+    {
+      id: 'templates',
+      title: 'Vorlagen',
+      body: [
+        'Wiederkehrende Belege müssen nicht jedes Mal neu getippt werden:',
+        '• Im Beleg-Editor: „Als Vorlage speichern“ — sichert Positionen, Einleitung und Notiz unter einem Namen (ohne Kunde)',
+        '• In der Filterleiste: „Aus Vorlage …“ — öffnet die Vorlagenliste; ein Klick erzeugt einen frischen Entwurf daraus',
+        'Vorlagen lassen sich in derselben Liste löschen (✕). Der Kunde wird im neuen Entwurf gewählt — Vorlagen sind bewusst kundenneutral.',
+      ],
+    },
+    {
       id: 'cancel',
       title: 'Stornieren',
       body: [
         'Storno-Knopf an jeder festgeschriebenen Rechnung: erzeugt eine Stornorechnung mit negierten Beträgen und eigener Nummer (ST-…).',
         'Die Original-Rechnung bleibt vollständig erhalten und wird als „storniert“ markiert — die Stornorechnung verweist auf sie.',
         'Danach einfach eine korrigierte neue Rechnung schreiben.',
+      ],
+    },
+    {
+      id: 'dashboard',
+      title: 'Übersicht (Dashboard)',
+      body: [
+        'Der Tab „Übersicht“ ist das Monitoring: alles Wichtige auf einen Blick, live aus deinen Belegen gerechnet.',
+        '• Kacheln — offene Posten, überfällige Summe, Umsatz Monat/Jahr, Entwürfe, Kunden',
+        '• Monatsumsatz — die letzten 12 Monate als Balken (Gutschriften und Stornos ziehen ab)',
+        '• Fällige Rechnungen — die nächsten Fälligkeiten, überfällige rot; Klick öffnet den Beleg',
+        '• Top-Kunden — die fünf umsatzstärksten Kunden',
+        'Umsatz zählt festgeschriebene Rechnungen (offen + bezahlt) minus Gutschriften und Stornos — Entwürfe, Angebote und Lieferscheine zählen nicht.',
       ],
     },
     {
@@ -190,11 +223,28 @@ const de: Content = {
     },
     {
       id: 'pdf',
-      title: 'PDF-Export',
+      title: 'PDF, Vorschau & Layouts',
       body: [
         'Der PDF-Knopf erzeugt ein A4-Dokument: Briefkopf mit Logo, Absenderzeile, Empfänger, Positionstabelle, USt-Aufstellung und Fußzeile mit Steuernummer und Bankverbindung.',
+        'Vorschau: das Augen-Symbol (Liste) bzw. „Vorschau“ (Editor) zeigt den Beleg vor dem Export — auch bei Entwürfen.',
+        'Drei Layouts, umschaltbar direkt in der Vorschau:',
+        '• Klassisch — nüchterner Briefkopf, dunkle Tabellenköpfe',
+        '• Modern — farbiges Kopfband in der Akzentfarbe',
+        '• Kompakt — engere Ränder und kleinere Schrift für lange Positionslisten',
+        'Das Standard-Layout stellst du unter Einstellungen → Darstellung ein; die Vorschau exportiert im gerade gewählten Layout.',
         'Der Dateiname folgt der Belegnummer (RE-2026-0001.pdf), den Speicherort wählst du im Dialog.',
-        'Einleitungstext und PDF-Fußzeile (Einstellungen) machen das Dokument persönlicher — beides optional.',
+      ],
+    },
+    {
+      id: 'security',
+      title: 'Sicherheit & Backups',
+      body: [
+        'Einstellungen → „Sicherheit & Backups“: Ein Backup ist eine JSON-Datei mit allem — Belege, Kunden, Artikel, Vorlagen, Nummernkreise und Einstellungen.',
+        '• „Backup jetzt erstellen …“ — speichert den kompletten Stand als Datei, wohin du willst',
+        '• „Backup wiederherstellen …“ — ersetzt nach Rückfrage ALLE Daten durch den Stand aus der Datei',
+        '• Automatisches Backup — legt bei jedem Start ein Backup im gewählten Ordner ab und behält die letzten 10 Stände',
+        'Tipp: Den Backup-Ordner auf ein NAS oder in einen synchronisierten Ordner legen — dann sind die Stände auch außer Haus.',
+        'Für invoices billed geplant: Cloud-Backup über eigenen Speicher, Backups nach Zeitplan und Ende-zu-Ende-Verschlüsselung.',
       ],
     },
     {
@@ -379,12 +429,45 @@ const en: Content = {
       ],
     },
     {
+      id: 'chain',
+      title: 'Document chain: quote → invoice',
+      body: [
+        'Besides invoices and credit notes there are quotes, order confirmations and delivery notes — via “More document types …” in the filter bar, each with its own number range (AN/AB/LS).',
+        '• Quotes carry a “valid until” date instead of a due date',
+        '• Delivery notes come without prices — the PDF lists only positions and quantities',
+        '• Finalized quotes and order confirmations have an arrow action: “Turn into invoice” — customer, positions and texts move into a fresh invoice draft that knows its origin',
+        'A quote becomes an invoice in seconds, with nothing typed twice.',
+      ],
+    },
+    {
+      id: 'templates',
+      title: 'Templates',
+      body: [
+        'Recurring documents don’t need to be retyped every time:',
+        '• In the document editor: “Save as template” — stores positions, introduction and note under a name (without a customer)',
+        '• In the filter bar: “From template …” — opens the template list; one click creates a fresh draft from it',
+        'Templates can be deleted in the same list (✕). The customer is chosen in the new draft — templates are deliberately customer-neutral.',
+      ],
+    },
+    {
       id: 'cancel',
       title: 'Cancelling',
       body: [
         'Cancel button on every finalized invoice: creates a cancellation invoice with negated amounts and its own number (ST-…).',
         'The original invoice is fully preserved and marked “cancelled” — the cancellation references it.',
         'Then simply write a corrected new invoice.',
+      ],
+    },
+    {
+      id: 'dashboard',
+      title: 'Overview (dashboard)',
+      body: [
+        'The “Overview” tab is your monitoring: everything important at a glance, computed live from your documents.',
+        '• Tiles — open items, overdue sum, revenue month/year, drafts, customers',
+        '• Monthly revenue — the last 12 months as bars (credit notes and cancellations subtract)',
+        '• Invoices due — the next due dates, overdue in red; clicking opens the document',
+        '• Top customers — your five strongest customers by revenue',
+        'Revenue counts finalized invoices (open + paid) minus credit notes and cancellations — drafts, quotes and delivery notes don’t count.',
       ],
     },
     {
@@ -399,11 +482,28 @@ const en: Content = {
     },
     {
       id: 'pdf',
-      title: 'PDF export',
+      title: 'PDF, preview & layouts',
       body: [
         'The PDF button produces an A4 document: letterhead with logo, sender line, recipient, positions table, VAT breakdown and a footer with tax number and bank details.',
+        'Preview: the eye icon (list) or “Preview” (editor) shows the document before exporting — drafts included.',
+        'Three layouts, switchable right in the preview:',
+        '• Classic — sober letterhead, dark table headers',
+        '• Modern — colored header band in your accent color',
+        '• Compact — tighter margins and smaller type for long position lists',
+        'Set the default layout under Settings → Appearance; the preview exports in whatever layout is selected.',
         'The file name follows the document number (RE-2026-0001.pdf); you pick the location in the dialog.',
-        'Introduction text and the PDF footer line (Settings) make the document more personal — both optional.',
+      ],
+    },
+    {
+      id: 'security',
+      title: 'Security & backups',
+      body: [
+        'Settings → “Security & backups”: a backup is one JSON file with everything — documents, customers, products, templates, number ranges and settings.',
+        '• “Create backup now …” — saves the complete state as a file, wherever you want',
+        '• “Restore backup …” — after confirmation, replaces ALL data with the file’s contents',
+        '• Automatic backup — writes a backup into the chosen folder on every launch and keeps the last 10',
+        'Tip: point the backup folder at a NAS or a synced folder — your backups leave the house too.',
+        'Planned for invoices billed: cloud backup via your own storage, scheduled backups and end-to-end encryption.',
       ],
     },
     {

@@ -25,6 +25,8 @@ fn main() {
                 settings: Mutex::new(s),
                 db_path,
             });
+            // automatisches lokales Backup beim Start (falls aktiviert)
+            commands::auto_backup(&app.state::<AppState>());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -40,6 +42,11 @@ fn main() {
             commands::set_paid,
             commands::cancel_doc,
             commands::delete_doc,
+            commands::list_templates,
+            commands::upsert_template,
+            commands::delete_template,
+            commands::export_backup,
+            commands::import_backup,
             commands::get_settings,
             commands::set_settings,
             commands::data_path,
