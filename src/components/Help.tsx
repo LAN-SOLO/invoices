@@ -119,6 +119,7 @@ const de: Content = {
         '• Farbschema — 20 Varianten von nüchtern bis mutig, jede nutzt vier Rollen-Farben: Titel, Akzent, Tabellenkopf, Zebra',
         '• Colorpicker — jede der vier Rollen ist frei übersteuerbar; die Live-Miniatur zeigt das Ergebnis sofort',
         '• Firmenkopf — Firmenname & Adresse im PDF-Kopf abschaltbar (dann trägt das Logo allein den Kopf)',
+        '• Fußtext — frei wählbarer Text für die PDF-Fußzeile, etwa Registergericht oder ein Gruß',
         'In der PDF-Vorschau lässt sich das Layout pro Export noch einmal umschalten.',
       ],
     },
@@ -158,7 +159,8 @@ const de: Content = {
       id: 'customers',
       title: 'Kunden',
       body: [
-        'Tab „Kunden“: Name/Firma, mehrzeilige Anschrift, E-Mail, USt-IdNr. und interne Notizen.',
+        'Tab „Kunden“: Name/Firma, Anschrift (mehrzeilig oder strukturiert mit Straße, PLZ und Ort — die strukturierten Felder machen die E-Rechnung vollständig), E-Mail, Telefon, Website, Ansprechpartner, Kundennummer, USt-IdNr. und interne Notizen.',
+        'Für Behörden-Kunden (B2G) gehört außerdem die Leitweg-ID in die Kundenkartei — sie landet als Käuferreferenz in der E-Rechnung (Details im Abschnitt „E-Rechnung“).',
         'Beim Festschreiben eines Belegs wird die Kunden-Anschrift eingefroren — ändert sich der Kunde später, bleiben alte Belege korrekt.',
         'Löschen: möglich, solange der Kunde in keinem Entwurf steckt. Festgeschriebene Belege behalten ihre Daten ohnehin.',
       ],
@@ -176,6 +178,7 @@ const de: Content = {
       title: 'Rechnungen & Entwürfe',
       body: [
         'Neue Belege starten als Entwurf: ohne Nummer, frei änderbar, jederzeit löschbar.',
+        'Jede Position hat neben Bezeichnung, Menge, Einheit, Preis und USt-Satz ein optionales Beschreibungsfeld — Platz für Details wie den Leistungszeitraum.',
         '„Festschreiben & Nummer vergeben“ macht daraus einen echten Beleg:',
         '• fortlaufende Nummer aus dem Nummernkreis (z. B. RE-2026-0001, pro Jahr neu ab 0001)',
         '• Status „offen“ — der Beleg zählt zu den offenen Posten',
@@ -281,7 +284,7 @@ const de: Content = {
       title: 'Datenablage',
       body: [
         'Alle Daten liegen in einer JSON-Datei im App-Datenordner deines Systems — Kunden, Artikel, Belege und Nummernkreise.',
-        'Backups: einfach die Datei sichern (der Pfad steht in den Einstellungen der Zukunft — bis dahin: App-Datenordner des Systems, Ordner „com.lan-solo.invoices“).',
+        'Backups: einfach die Datei sichern — sie liegt im App-Datenordner deines Systems im Ordner „com.lan-solo.invoices“. Bequemer ist das automatische Backup in den Einstellungen (Abschnitt „Sicherheit & Backups“).',
         'invoices ist ein Werkzeug, keine Steuerberatung — Aufbewahrungspflichten (GoBD) bleiben deine Verantwortung. Feste Nummernkreise und unveränderliche Belege helfen dabei.',
       ],
     },
@@ -392,6 +395,7 @@ const en: Content = {
         '• Color scheme — 20 variants from sober to bold, each using four role colors: title, accent, table head, zebra',
         '• Color pickers — each of the four roles is freely adjustable; the live thumbnail shows the result immediately',
         '• Company header — the name & address block in the PDF header can be turned off (the logo then carries the header alone)',
+        '• Footer text — free text for the PDF footer, e.g. the trade register or a greeting',
         'In the PDF preview the layout can still be switched per export.',
       ],
     },
@@ -431,7 +435,8 @@ const en: Content = {
       id: 'customers',
       title: 'Customers',
       body: [
-        '“Customers” tab: name/company, multiline address, email, VAT ID and internal notes.',
+        '“Customers” tab: name/company, address (multiline or structured with street, postal code and city — the structured fields complete the e-invoice), email, phone, website, contact person, customer number, VAT ID and internal notes.',
+        'For public-sector customers (B2G) the customer record also holds the Leitweg-ID — it goes into the e-invoice as the buyer reference (details in the “E-invoice” section).',
         'When a document is finalized, the customer address is frozen into it — if the customer changes later, old documents stay correct.',
         'Deleting: possible as long as the customer is not used in a draft. Finalized documents keep their data anyway.',
       ],
@@ -449,6 +454,7 @@ const en: Content = {
       title: 'Invoices & drafts',
       body: [
         'New documents start as drafts: no number, freely editable, deletable anytime.',
+        'Besides name, quantity, unit, price and VAT rate, every position has an optional description field — room for details such as the service period.',
         '“Finalize & assign number” turns them into real documents:',
         '• sequential number from the number range (e.g. RE-2026-0001, restarting at 0001 each year)',
         '• status “open” — the document counts towards open items',
@@ -554,7 +560,7 @@ const en: Content = {
       title: 'Data storage',
       body: [
         'All data lives in one JSON file in your system’s app-data folder — customers, products, documents and number ranges.',
-        'Backups: just copy that file (system app-data folder, “com.lan-solo.invoices”).',
+        'Backups: just copy that file — it lives in your system’s app-data folder under “com.lan-solo.invoices”. More convenient: the automatic backup in Settings (see “Security & backups”).',
         'invoices is a tool, not tax advice — retention duties stay your responsibility. Fixed number ranges and immutable documents help with that.',
       ],
     },
