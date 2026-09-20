@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Lang } from '../i18n';
 
 // Selbstständiges Hilfe-System: schwebender ?-Button, First-Run-Tutorial
@@ -587,7 +587,13 @@ const en: Content = {
 const SEEN_KEY = 'invoices.tutorialSeen';
 
 export function Help({ lang }: { lang: Lang }) {
-  const c = lang === 'de' ? de : en;
+  // Sprache der Hilfe: folgt der App-Sprache, lässt sich aber im Kopf der
+  // Hilfe jederzeit zwischen DE und EN umschalten
+  const [helpLang, setHelpLang] = useState<'de' | 'en'>(lang === 'de' ? 'de' : 'en');
+  useEffect(() => {
+    setHelpLang(lang === 'de' ? 'de' : 'en');
+  }, [lang]);
+  const c = helpLang === 'de' ? de : en;
   const [mode, setMode] = useState<'closed' | 'tutorial' | 'manual'>(() =>
     localStorage.getItem(SEEN_KEY) ? 'closed' : 'tutorial'
   );
@@ -640,6 +646,14 @@ export function Help({ lang }: { lang: Lang }) {
                 {c.labels.manual}
               </button>
               <span className="hlp-spacer" />
+              <span className="hlp-lang" role="group" aria-label="Sprache / Language">
+                <button className={`hlp-lang-btn ${helpLang === 'de' ? 'active' : ''}`} onClick={() => setHelpLang('de')}>
+                  DE
+                </button>
+                <button className={`hlp-lang-btn ${helpLang === 'en' ? 'active' : ''}`} onClick={() => setHelpLang('en')}>
+                  EN
+                </button>
+              </span>
               <button className="hlp-close" onClick={close}>
                 ✕
               </button>
