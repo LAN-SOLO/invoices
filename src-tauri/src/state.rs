@@ -12,6 +12,8 @@ pub struct AppState {
     /// Pfad einer beim Laden zur Seite gelegten, unlesbaren Datenbank —
     /// die Oberfläche zeigt dazu einen Hinweis.
     pub quarantined: Mutex<Option<PathBuf>>,
+    /// Fehler des automatischen Start-Backups (Fehlercode + Detail).
+    pub backup_error: Mutex<Option<String>>,
 }
 
 impl AppState {

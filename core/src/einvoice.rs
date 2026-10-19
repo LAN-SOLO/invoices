@@ -328,7 +328,15 @@ pub fn einvoice_xml(doc: &Doc, seller: &Seller, buyer: &Buyer) -> String {
     }));
     xml.push_str("</ram:ApplicableHeaderTradeAgreement>");
 
-    xml.push_str("<ram:ApplicableHeaderTradeDelivery/>");
+    // Leistungsdatum (BT-72) — leer = Belegdatum (§14 UStG verlangt eine
+    // Angabe; ohne sie meldet PEPPOL-R008 eine Warnung)
+    let service = if doc.service_date.trim().is_empty() { &doc.date } else { &doc.service_date };
+    xml.push_str(&format!(
+        "<ram:ApplicableHeaderTradeDelivery><ram:ActualDeliverySupplyChainEvent>\
+         <ram:OccurrenceDateTime><udt:DateTimeString format=\"102\">{}</udt:DateTimeString>\
+         </ram:OccurrenceDateTime></ram:ActualDeliverySupplyChainEvent></ram:ApplicableHeaderTradeDelivery>",
+        date102(service)
+    ));
 
     // Zahlung & Steuern
     xml.push_str("<ram:ApplicableHeaderTradeSettlement>");
@@ -519,6 +527,26 @@ mod tests {
         assert!(xml.contains("<ram:PostcodeCode>20095</ram:PostcodeCode>"));
         assert!(xml.contains("<ram:CityName>Hamburg</ram:CityName>"));
         assert!(xml.contains("<ram:CountryID>DE</ram:CountryID>"));
+    }
+
+    #[test]
+    fn delivery_date_is_service_date_or_document_date() {
+        let d = doc();
+        let xml = einvoice_xml(&d, &seller(), &buyer(""));
+        let expect = format!(
+            "<ram:ActualDeliverySupplyChainEvent><ram:OccurrenceDateTime><udt:DateTimeString format=\"102\">{}</udt:DateTimeString>",
+            date102(&d.date)
+        );
+        assert!(xml.contains(&expect), "{xml}");
+        let mut d2 = doc();
+        d2.service_date = "2026-01-31".into();
+        let xml2 = einvoice_xml(&d2, &seller(), &buyer(""));
+        assert!(xml2.contains("<udt:DateTimeString format=\"102\">20260131</udt:DateTimeString></ram:OccurrenceDateTime>"));
+        // Reihenfolge laut CII-Schema: Delivery zwischen Agreement und Settlement
+        let a = xml2.find("</ram:ApplicableHeaderTradeAgreement>").unwrap();
+        let dl = xml2.find("<ram:ApplicableHeaderTradeDelivery>").unwrap();
+        let st = xml2.find("<ram:ApplicableHeaderTradeSettlement>").unwrap();
+        assert!(a < dl && dl < st);
     }
 
     #[test]

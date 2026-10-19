@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Customer, Product, Template, centsToInput, parseMoney } from '../api';
 import { Dict, Lang } from '../i18n';
+import { confirmDialog } from '../dialogs';
 
 /// Alt-Daten (nur mehrzeilige Anschrift) in die strukturierten Felder
 /// heben: Zeile "PLZ Ort" wird erkannt, die erste andere Zeile wird Straße.
@@ -206,9 +207,10 @@ export function TemplatesModal({
             </button>
             <button
               className="icon danger"
-              title={t.actDelete}
-              onClick={() => {
-                if (window.confirm(t.confirmDeleteTemplate)) onDelete(template.id);
+              title={t.del}
+              onClick={async () => {
+                if (await confirmDialog(t.confirmDeleteTemplate, { ok: t.del, cancel: t.dlgBack }))
+                  onDelete(template.id);
               }}
             >
               ✕

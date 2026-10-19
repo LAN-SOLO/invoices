@@ -48,6 +48,30 @@ pub fn year_of(iso: &str) -> Option<i32> {
     iso.get(..4).and_then(|y| y.parse::<i32>().ok())
 }
 
+/// Gültiges ISO-Datum "YYYY-MM-DD" (inkl. Schaltjahr-Prüfung)?
+pub fn valid_iso_date(iso: &str) -> bool {
+    let b = iso.as_bytes();
+    if b.len() != 10 || b[4] != b'-' || b[7] != b'-' {
+        return false;
+    }
+    let num = |r: std::ops::Range<usize>| -> Option<u32> {
+        let part = iso.get(r)?;
+        if part.bytes().all(|c| c.is_ascii_digit()) { part.parse().ok() } else { None }
+    };
+    let (Some(y), Some(m), Some(d)) = (num(0..4), num(5..7), num(8..10)) else {
+        return false;
+    };
+    let leap = (y % 4 == 0 && y % 100 != 0) || y % 400 == 0;
+    let days = match m {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        2 if leap => 29,
+        2 => 28,
+        _ => return false,
+    };
+    y >= 1900 && (1..=days).contains(&d)
+}
+
 /// Festschreiben: fortlaufende Nummer vergeben, Status "offen".
 /// `fmt_for_year` bekommt das Jahr des Belegdatums (falls lesbar).
 pub fn finalize<'a>(
@@ -65,6 +89,17 @@ pub fn finalize<'a>(
     }
     if db.docs[idx].customer_name.trim().is_empty() {
         return Err("doc-no-customer");
+    }
+    // Ohne gültiges Belegdatum keine Nummer: das Jahr im Nummernkreis und
+    // das Rechnungsdatum der E-Rechnung hängen daran.
+    {
+        let d = &db.docs[idx];
+        if !valid_iso_date(&d.date)
+            || (!d.due_date.is_empty() && !valid_iso_date(&d.due_date))
+            || (!d.service_date.is_empty() && !valid_iso_date(&d.service_date))
+        {
+            return Err("doc-bad-date");
+        }
     }
     let fmt = fmt_for_year(year_of(&db.docs[idx].date));
     let number = next_number(db, prefix, fmt);
@@ -129,6 +164,12 @@ pub fn cancel(
         customer_address: original.customer_address.clone(),
         date: today.to_string(),
         due_date: today.to_string(),
+        // Storno betrifft die Leistung der Original-Rechnung
+        service_date: if original.service_date.is_empty() {
+            original.date.clone()
+        } else {
+            original.service_date.clone()
+        },
         items,
         // Stornos gehen sofort live — sie dokumentieren, sie fordern nicht.
         status: DocStatus::Open,
@@ -219,6 +260,69 @@ mod tests {
         let mut nan = draft("n", DocKind::Invoice);
         nan.items[0].quantity = f64::NAN;
         assert_eq!(upsert_draft(&mut db, nan), Err("bad-quantity"));
+    }
+
+    #[test]
+    fn iso_dates_are_validated() {
+        assert!(valid_iso_date("2026-03-01"));
+        assert!(valid_iso_date("2028-02-29"));
+        assert!(!valid_iso_date("2026-02-29"));
+        assert!(!valid_iso_date("2100-02-29"));
+        assert!(valid_iso_date("2000-02-29"));
+        assert!(!valid_iso_date("2026-13-01"));
+        assert!(!valid_iso_date("2026-04-31"));
+        assert!(!valid_iso_date(""));
+        assert!(!valid_iso_date("2026-3-1"));
+        assert!(!valid_iso_date("01.03.2026"));
+        assert!(!valid_iso_date("2026-0a-01"));
+        assert!(!valid_iso_date("+026-01-01"));
+    }
+
+    #[test]
+    fn finalize_rejects_bad_dates_without_using_a_number() {
+        let mut db = Db::default();
+        let mut nodate = draft("d1", DocKind::Invoice);
+        nodate.date = String::new();
+        upsert_draft(&mut db, nodate).unwrap();
+        assert_eq!(finalize(&mut db, "d1", "RE", fmt).unwrap_err(), "doc-bad-date");
+        let mut baddue = draft("d2", DocKind::Invoice);
+        baddue.due_date = "NaN-NaN-NaN".into();
+        upsert_draft(&mut db, baddue).unwrap();
+        assert_eq!(finalize(&mut db, "d2", "RE", fmt).unwrap_err(), "doc-bad-date");
+        let mut badservice = draft("d3", DocKind::Invoice);
+        badservice.service_date = "2026-02-30".into();
+        upsert_draft(&mut db, badservice).unwrap();
+        assert_eq!(finalize(&mut db, "d3", "RE", fmt).unwrap_err(), "doc-bad-date");
+        // leere Fälligkeit/Leistungsdatum sind erlaubt (Lieferschein, = Belegdatum)
+        let mut ok = draft("d4", DocKind::DeliveryNote);
+        ok.due_date = String::new();
+        upsert_draft(&mut db, ok).unwrap();
+        assert_eq!(
+            finalize(&mut db, "d4", "LS", fmt).unwrap().number.as_deref(),
+            Some("LS-2026-0001")
+        );
+        let mut inv = draft("d5", DocKind::Invoice);
+        inv.service_date = "2026-02-27".into();
+        upsert_draft(&mut db, inv).unwrap();
+        assert_eq!(
+            finalize(&mut db, "d5", "RE", fmt).unwrap().number.as_deref(),
+            Some("RE-2026-0001")
+        );
+    }
+
+    #[test]
+    fn cancellation_keeps_the_service_date_of_the_original() {
+        let mut db = Db::default();
+        let mut inv = draft("d1", DocKind::Invoice);
+        inv.service_date = "2026-02-20".into();
+        upsert_draft(&mut db, inv).unwrap();
+        finalize(&mut db, "d1", "RE", fmt).unwrap();
+        let st = cancel(&mut db, "d1", "s1", "ST", fmt(Some(2026)), "2026-04-01", "now").unwrap();
+        assert_eq!(st.service_date, "2026-02-20");
+        upsert_draft(&mut db, draft("d2", DocKind::Invoice)).unwrap();
+        finalize(&mut db, "d2", "RE", fmt).unwrap();
+        let st2 = cancel(&mut db, "d2", "s2", "ST", fmt(Some(2026)), "2026-04-01", "now").unwrap();
+        assert_eq!(st2.service_date, "2026-03-01");
     }
 
     #[test]

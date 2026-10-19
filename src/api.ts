@@ -65,6 +65,8 @@ export interface Doc {
   customerAddress: string;
   date: string;
   dueDate: string;
+  /** Leistungsdatum (ISO); leer = Belegdatum. */
+  serviceDate: string;
   items: LineItem[];
   status: DocStatus;
   smallBusiness: boolean;
@@ -155,6 +157,7 @@ export const api = {
   setSettings: (s: Settings) => invoke<void>('set_settings', { new: s }),
   dataPath: () => invoke<string>('data_path'),
   startupNotice: () => invoke<string | null>('startup_notice'),
+  backupNotice: () => invoke<string | null>('backup_notice'),
   writeFile: (path: string, dataBase64: string) =>
     invoke<void>('write_file', { path, dataBase64 }),
   getLogo: () => invoke<string | null>('get_logo'),
@@ -250,6 +253,8 @@ export function todayIso(): string {
 
 export function addDaysIso(iso: string, days: number): string {
   const d = new Date(`${iso}T00:00:00`);
+  // geleertes/ungültiges Datumsfeld → kein „NaN-NaN-NaN“
+  if (Number.isNaN(d.getTime())) return '';
   d.setDate(d.getDate() + days);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(
     d.getDate()
@@ -306,10 +311,16 @@ export function parseMoney(raw: string): number {
 
 /// Fehler aus dem Backend (Fehlercode wie "doc-finalized" oder
 /// "save-failed: …") in einen lesbaren Text übersetzen.
+/// Bekannte Codes werden in der UI-Sprache gezeigt; ein Detail nach dem
+/// Doppelpunkt (Betriebssystem-Meldung) steht in Klammern dahinter.
 export function errText(e: unknown, errors: Record<string, string>): string {
-  const raw = String(e);
-  const code = raw.split(':')[0].trim();
-  return errors[code] ?? raw;
+  const raw = e instanceof Error ? e.message : String(e);
+  const idx = raw.indexOf(':');
+  const code = (idx >= 0 ? raw.slice(0, idx) : raw).trim();
+  const known = errors[code];
+  if (!known) return raw;
+  const detail = idx >= 0 ? raw.slice(idx + 1).trim() : '';
+  return detail ? `${known} (${detail})` : known;
 }
 
 /// Dateiname für den Speichern-Dialog: Pfadtrenner und unter Windows

@@ -34,6 +34,7 @@ import { SettingsModal } from './components/SettingsModal';
 import { Help } from './components/Help';
 import { buildPdf, bytesToBase64 } from './pdf';
 import { embedZugferd } from './zugferd';
+import { confirmDialog, notifyDialog } from './dialogs';
 import {
   IconArrowRight,
   IconBox,
@@ -95,6 +96,13 @@ export default function App() {
     (e: unknown) => showToast(errText(e, t.errors), 4000),
     [showToast, t]
   );
+  /// Wichtiger Hinweis als nativer Dialog — klappt der nicht, als Toast.
+  const notify = useCallback(
+    async (text: string, dict = t) => {
+      if (!(await notifyDialog(text, dict.dlgOk))) showToast(text, 8000);
+    },
+    [showToast, t]
+  );
 
   const refresh = useCallback(() => {
     api.listDocs(query).then(setDocs).catch(() => {});
@@ -126,7 +134,16 @@ export default function App() {
       api
         .startupNotice()
         .then((path) => {
-          if (path) window.alert(dicts[s.language ?? 'de'].dbQuarantined(path));
+          const d = dicts[s.language ?? 'de'];
+          if (path) notify(d.dbQuarantined(path), d);
+        })
+        .catch(() => {});
+      // fehlgeschlagenes Auto-Backup beim Start melden (nicht verschlucken)
+      api
+        .backupNotice()
+        .then((err) => {
+          const d = dicts[s.language ?? 'de'];
+          if (err) notify(errText(err, d.errors), d);
         })
         .catch(() => {});
       // stiller Update-Check beim Start — mit Auto-Update wird direkt
@@ -138,7 +155,10 @@ export default function App() {
           setUpdateAvail(u);
           if (s.autoUpdate) {
             setInstalling(true);
-            api.installUpdate().catch(() => setInstalling(false));
+            api.installUpdate().catch((e) => {
+              setInstalling(false);
+              showToast(errText(e, dicts[s.language ?? 'de'].errors), 6000);
+            });
           }
         })
         .catch(() => {});
@@ -148,11 +168,24 @@ export default function App() {
   // Darstellung aus den Einstellungen auf <html> spiegeln
   useEffect(() => {
     if (!settings) return;
+    document.documentElement.lang = settings.language;
     document.documentElement.dataset.theme = settings.theme;
     document.documentElement.dataset.accent = settings.accent;
   }, [settings]);
 
   useEffect(refresh, [refresh]);
+
+  // Auto-Backup läuft im Hintergrund — scheitert es erst, nachdem die
+  // Oberfläche schon steht, kommt der Fehler als Event
+  useEffect(() => {
+    const sub = listen<string>('backup-failed', (ev) => {
+      api.backupNotice().catch(() => {}); // als gemeldet abholen
+      showToast(errText(ev.payload, t.errors), 8000);
+    });
+    return () => {
+      sub.then((un) => un());
+    };
+  }, [showToast, t]);
 
   useEffect(() => {
     const sub = listen('db-changed', refresh);
@@ -175,6 +208,7 @@ export default function App() {
         kind === 'invoice' || kind === 'quote'
           ? addDaysIso(date, s.paymentTermsDays)
           : date,
+      serviceDate: '',
       items: [],
       status: 'draft',
       smallBusiness: s.smallBusiness,
@@ -311,7 +345,7 @@ export default function App() {
   };
 
   const cancelInvoice = async (doc: Doc) => {
-    if (!window.confirm(t.confirmCancel)) return;
+    if (!(await confirmDialog(t.confirmCancel, { ok: t.actCancel, cancel: t.dlgBack }))) return;
     try {
       const storno = await api.cancelDoc(doc.id, uid());
       showToast(`${t.cancelled}: ${storno.number}`);
@@ -517,6 +551,7 @@ export default function App() {
           onPdf={exportPdf}
           onPreview={(d) => setPreviewDoc(d)}
           onSaveTemplate={(d) => setTemplateSource(d)}
+          onError={showError}
         />
       ) : tab === 'docs' ? (
         <>
@@ -548,7 +583,7 @@ export default function App() {
               {t.fromTemplate}
             </button>
             <span className="count">
-              {docs.length} {t.docsCount} · {fmtMoney(openCents, lang)} {t.openSum}
+              {docs.length} {docs.length === 1 ? t.docsCountOne : t.docsCount} · {fmtMoney(openCents, lang)} {t.openSum}
             </span>
           </div>
           <div className="list">
@@ -672,8 +707,13 @@ export default function App() {
                               <button
                                 className="icon danger"
                                 title={t.actDelete}
-                                onClick={() => {
-                                  if (window.confirm(t.confirmDeleteDraft))
+                                onClick={async () => {
+                                  if (
+                                    await confirmDialog(t.confirmDeleteDraft, {
+                                      ok: t.del,
+                                      cancel: t.dlgBack,
+                                    })
+                                  )
                                     api.deleteDoc(doc.id).catch(showError);
                                 }}
                               >
@@ -722,9 +762,15 @@ export default function App() {
                         </button>
                         <button
                           className="icon danger"
-                          title={t.actDelete}
-                          onClick={() => {
-                            if (!window.confirm(t.confirmDeleteCustomer)) return;
+                          title={t.del}
+                          onClick={async () => {
+                            if (
+                              !(await confirmDialog(t.confirmDeleteCustomer, {
+                                ok: t.del,
+                                cancel: t.dlgBack,
+                              }))
+                            )
+                              return;
                             api.deleteCustomer(c.id).catch(showError);
                           }}
                         >
@@ -768,9 +814,14 @@ export default function App() {
                         </button>
                         <button
                           className="icon danger"
-                          title={t.actDelete}
-                          onClick={() => {
-                            if (window.confirm(t.confirmDeleteProduct))
+                          title={t.del}
+                          onClick={async () => {
+                            if (
+                              await confirmDialog(t.confirmDeleteProduct, {
+                                ok: t.del,
+                                cancel: t.dlgBack,
+                              })
+                            )
                               api.deleteProduct(p.id).catch(showError);
                           }}
                         >
@@ -894,7 +945,8 @@ export default function App() {
               api
                 .startupNotice()
                 .then((path) => {
-                  if (path) window.alert(dicts[fresh.language ?? 'de'].dbQuarantined(path));
+                  const d = dicts[fresh.language ?? 'de'];
+                  if (path) notify(d.dbQuarantined(path), d);
                 })
                 .catch(() => {});
             });
@@ -916,7 +968,10 @@ export default function App() {
             disabled={installing}
             onClick={() => {
               setInstalling(true);
-              api.installUpdate().catch(() => setInstalling(false));
+              api.installUpdate().catch((e) => {
+                setInstalling(false);
+                showError(e);
+              });
             }}
           >
             {installing ? t.updateInstalling : t.updateInstall}

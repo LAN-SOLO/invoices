@@ -16,6 +16,7 @@ import {
 import { Dict, Lang } from '../i18n';
 import { IconPlus, IconTrash } from '../icons';
 import { CustomerModal } from './Modals';
+import { confirmDialog } from '../dialogs';
 
 // Beleg-Editor: Entwürfe sind voll editierbar, festgeschriebene Belege
 // öffnen als read-only Ansicht (GoBD-Denke — korrigiert wird per Storno).
@@ -33,6 +34,7 @@ interface Props {
   onPdf: (doc: Doc) => void;
   onPreview: (doc: Doc) => void;
   onSaveTemplate: (doc: Doc) => void;
+  onError: (e: unknown) => void;
 }
 
 export function DocEditor({
@@ -48,6 +50,7 @@ export function DocEditor({
   onPdf,
   onPreview,
   onSaveTemplate,
+  onError,
 }: Props) {
   const readOnly = doc.status !== 'draft';
   const [d, setD] = useState<Doc>({ ...doc, items: doc.items.map((i) => ({ ...i })) });
@@ -59,6 +62,17 @@ export function DocEditor({
   const [priceStr, setPriceStr] = useState<string[]>(
     doc.items.map((i) => centsToInput(i.unitPriceCents, lang))
   );
+
+  // Ausgangsstand für „ungespeicherte Änderungen?“ beim Verlassen
+  const [initial] = useState(() => JSON.stringify(doc));
+
+  const leave = async () => {
+    if (!readOnly && JSON.stringify(committed()) !== initial) {
+      const ok = await confirmDialog(t.confirmDiscard, { ok: t.discard, cancel: t.dlgBack });
+      if (!ok) return;
+    }
+    onClose();
+  };
 
   const sums = useMemo(() => totals(d.items, d.smallBusiness), [d.items, d.smallBusiness]);
 
@@ -146,7 +160,7 @@ export function DocEditor({
   return (
     <div className="editor-wrap">
       <div className="editor-head">
-        <button className="ghost" onClick={onClose}>
+        <button className="ghost" onClick={leave}>
           ← {t.back}
         </button>
         <span className="editor-title">{title}</span>
@@ -234,6 +248,19 @@ export function DocEditor({
                 disabled={readOnly}
                 value={d.dueDate}
                 onChange={(e) => set('dueDate', e.target.value)}
+              />
+            </label>
+          ) : (
+            <span />
+          )}
+          {d.kind === 'invoice' || d.kind === 'creditnote' || d.kind === 'cancellation' ? (
+            <label className="field" title={t.serviceDateHint}>
+              <span>{t.serviceDate}</span>
+              <input
+                type="date"
+                disabled={readOnly}
+                value={d.serviceDate}
+                onChange={(e) => set('serviceDate', e.target.value)}
               />
             </label>
           ) : (
@@ -345,7 +372,7 @@ export function DocEditor({
                 <td className="num">{fmtMoney(lineTotalCents(item), lang)}</td>
                 {!readOnly && (
                   <td>
-                    <button className="icon danger" title={t.actDelete} onClick={() => removeItem(i)}>
+                    <button className="icon danger" title={t.del} onClick={() => removeItem(i)}>
                       <IconTrash />
                     </button>
                   </td>
@@ -431,15 +458,18 @@ export function DocEditor({
           t={t}
           onClose={() => setNewCust(null)}
           onSave={(c) => {
-            api.upsertCustomer(c).then(() => {
-              setD((prev) => ({
-                ...prev,
-                customerId: c.id,
-                customerName: c.name,
-                customerAddress: c.address,
-              }));
-              setNewCust(null);
-            });
+            api
+              .upsertCustomer(c)
+              .then(() => {
+                setD((prev) => ({
+                  ...prev,
+                  customerId: c.id,
+                  customerName: c.name,
+                  customerAddress: c.address,
+                }));
+                setNewCust(null);
+              })
+              .catch(onError);
           }}
         />
       )}

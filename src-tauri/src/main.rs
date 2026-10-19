@@ -8,7 +8,7 @@ mod state;
 
 use state::AppState;
 use std::sync::Mutex;
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 
 fn main() {
     tauri::Builder::default()
@@ -39,12 +39,19 @@ fn main() {
                 db_path: Mutex::new(db_path),
                 active_company: Mutex::new(active),
                 quarantined: Mutex::new(quarantined),
+                backup_error: Mutex::new(None),
             });
             // automatisches lokales Backup beim Start (falls aktiviert) —
             // im Hintergrund: ein nicht erreichbarer Netz-/UNC-Ordner darf
             // den Fensterstart nicht blockieren
             let bg = app.handle().clone();
-            std::thread::spawn(move || commands::auto_backup(&bg.state::<AppState>()));
+            std::thread::spawn(move || {
+                let st = bg.state::<AppState>();
+                if let Err(e) = commands::auto_backup(&st) {
+                    *st.backup_error.lock().unwrap() = Some(e.clone());
+                    let _ = bg.emit("backup-failed", e);
+                }
+            });
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -73,6 +80,7 @@ fn main() {
             commands::delete_company,
             commands::data_path,
             commands::startup_notice,
+            commands::backup_notice,
             commands::write_file,
             commands::get_logo,
             commands::einvoice_xml,

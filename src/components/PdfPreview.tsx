@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { save } from '@tauri-apps/plugin-dialog';
-import { api, Doc, Settings, safeFileName } from '../api';
+import { api, Doc, errText, Settings, safeFileName } from '../api';
 import { Dict, Lang } from '../i18n';
 import { buildPdf, bytesToBase64, PdfLayout } from '../pdf';
 
@@ -50,7 +50,15 @@ export function PdfPreview({ doc, settings, relatedNumber, t, lang, onClose, sho
 
   useEffect(() => {
     if (!logoLoaded) return;
-    const { bytes } = buildPdf(doc, settings, t, lang, logo, relatedNumber, layout);
+    let bytes: Uint8Array;
+    try {
+      ({ bytes } = buildPdf(doc, settings, t, lang, logo, relatedNumber, layout));
+    } catch (e) {
+      // kaputtes Logo o. ä. — Fehler zeigen statt die Oberfläche abstürzen lassen
+      showToast(errText(e, t.errors));
+      setUrl(null);
+      return;
+    }
     const blobUrl = URL.createObjectURL(
       new Blob([bytes.slice().buffer], { type: 'application/pdf' })
     );
@@ -70,7 +78,7 @@ export function PdfPreview({ doc, settings, relatedNumber, t, lang, onClose, sho
       showToast(t.pdfSaved);
       onClose();
     } catch (e) {
-      showToast(String(e));
+      showToast(errText(e, t.errors));
     }
   };
 

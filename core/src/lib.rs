@@ -111,6 +111,9 @@ pub struct Doc {
     /// ISO date "YYYY-MM-DD".
     pub date: String,
     pub due_date: String,
+    /// Leistungsdatum (§14 Abs. 4 Nr. 6 UStG, BT-72) als ISO-Datum —
+    /// leer heißt „Leistungsdatum = Belegdatum“.
+    pub service_date: String,
     pub items: Vec<LineItem>,
     pub status: DocStatus,
     pub small_business: bool,
@@ -323,11 +326,20 @@ pub fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
         .file_name()
         .map(|n| n.to_string_lossy().to_string())
         .unwrap_or_else(|| "file".into());
-    let tmp = path.with_file_name(format!("{name}.tmp"));
-    {
+    // eindeutiger Temp-Name: zwei gleichzeitige Exporte auf dasselbe Ziel
+    // (Befehle laufen parallel im Thread-Pool) teilen sich keine Temp-Datei
+    static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let seq = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let tmp = path.with_file_name(format!("{name}.{}-{seq}.tmp", std::process::id()));
+    let written = (|| {
         let mut file = std::fs::File::create(&tmp)?;
         file.write_all(bytes)?;
-        file.sync_all()?;
+        file.sync_all()
+    })();
+    if let Err(e) = written {
+        // halbe Temp-Datei nicht liegen lassen (Platte voll, Netzlaufwerk weg)
+        let _ = std::fs::remove_file(&tmp);
+        return Err(e);
     }
     // Windows: Virenscanner/Indexer halten frisch geschriebene Dateien
     // gelegentlich kurz offen — Rename dann ein paar Mal wiederholen.
@@ -469,7 +481,29 @@ mod tests {
         write_atomic(&path, b"one").unwrap();
         write_atomic(&path, b"two").unwrap();
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "two");
-        assert!(!dir.join("x.json.tmp").exists());
+        let names: Vec<_> = std::fs::read_dir(&dir).unwrap().map(|e| e.unwrap().file_name()).collect();
+        assert_eq!(names, vec![std::ffi::OsString::from("x.json")], "keine Temp-Reste");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn concurrent_atomic_writes_to_one_target_do_not_collide() {
+        let dir = std::env::temp_dir().join(format!("invoices-core-par-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("Rechnung Müller.pdf");
+        let handles: Vec<_> = (0..8)
+            .map(|i| {
+                let p = path.clone();
+                std::thread::spawn(move || write_atomic(&p, format!("content-{i}").repeat(2000).as_bytes()))
+            })
+            .collect();
+        for h in handles {
+            h.join().unwrap().unwrap();
+        }
+        let body = std::fs::read_to_string(&path).unwrap();
+        assert!(body.starts_with("content-") && body.len() >= 9 * 2000);
+        assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 1, "keine Temp-Reste");
         let _ = std::fs::remove_dir_all(&dir);
     }
 

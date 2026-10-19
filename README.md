@@ -4,7 +4,7 @@ Rechnungstool für kleine Unternehmen — schreiben, senden, abhaken. Version 1.
 
 - **Belege:** Rechnungen, Gutschriften, Storno, Angebote, Auftragsbestätigungen und Lieferscheine — Entwürfe frei, festgeschrieben unveränderlich, korrigiert wird per Storno. Angebot/AB per Klick zur Rechnung, Vorlagen für Wiederkehrendes.
 - **Stammdaten:** Kunden (strukturierte Anschrift, Leitweg-ID) und Artikel einmal anlegen, überall einfügen.
-- **Steuern, richtig:** USt 19/7/0 % in ganzzahliger Cent-Rechnung, Kleinunternehmerregelung nach §19 UStG, fortlaufende Nummernkreise (mit/ohne Jahr, Stellen, Trennzeichen).
+- **Steuern, richtig:** USt 19/7/0 % in ganzzahliger Cent-Rechnung, Kleinunternehmerregelung nach §19 UStG, fortlaufende Nummernkreise (mit/ohne Jahr, Stellen, Trennzeichen), Leistungsdatum (§14 UStG, leer = Belegdatum).
 - **PDF:** A4-Beleg mit Briefkopf, Logo, USt-Aufstellung und Bankverbindung — vier Layouts, 20 Farbschemata, Live-Vorschau.
 - **E-Rechnung:** XRechnung-/Factur-X-XML (CII, EN 16931) und ZUGFeRD-Hybrid-PDF.
 - **Überblick:** Dashboard mit offenen Posten, Überfälligem, Monatsumsatz und Top-Kunden.
@@ -18,10 +18,12 @@ DE/EN, signierte In-App-Updates. Alles lokal — kein Konto, keine Cloud, keine 
 pnpm install
 pnpm tauri dev
 pnpm build              # Typecheck + Frontend-Build
-cargo test --workspace  # Core (Geld, Nummernkreise, Workflow, E-Rechnung) + Backend-Helfer
+cargo test --workspace  # Core (Geld, Nummernkreise, Workflow, E-Rechnung) + Backend-Helfer (Pfade, Backup, Wiederherstellung)
 ```
 
-Audit- und Teststand zur 1.0: `AUDIT-1.0.md`.
+Audit- und Teststand zur 1.0: `AUDIT-1.0.md` (inkl. Runde 2).
+
+Rückfragen und Hinweise laufen ausschließlich über `src/dialogs.ts` (tauri-plugin-dialog, `await`) — nie `window.confirm/alert/prompt`, die das Plugin durch asynchrone Stubs ersetzt.
 
 ## Release-Build (lokal)
 

@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import { getVersion } from '@tauri-apps/api/app';
 import { open, save } from '@tauri-apps/plugin-dialog';
-import { api, CompanyRegistry, errText, numberPreview, Settings, UpdateInfo } from '../api';
+import { api, CompanyRegistry, errText, fmtMoney, numberPreview, Settings, todayIso, UpdateInfo } from '../api';
+import { confirmDialog } from '../dialogs';
 import { Dict } from '../i18n';
 import { SCHEMES } from '../schemes';
 
@@ -32,6 +33,7 @@ export function SettingsModal({
   const [tab, setTab] = useState<SetTab>('company');
   const [s, setS] = useState<Settings>({ ...settings });
   const [updState, setUpdState] = useState<'idle' | 'checking' | 'none' | 'error'>('idle');
+  const [updErr, setUpdErr] = useState('');
   const [update, setUpdate] = useState<UpdateInfo | null>(null);
   const [installing, setInstalling] = useState(false);
   const [backupMsg, setBackupMsg] = useState('');
@@ -71,7 +73,7 @@ export function SettingsModal({
 
   const pickLogo = async () => {
     const picked = await open({
-      filters: [{ name: 'Bild', extensions: ['png', 'jpg', 'jpeg'] }],
+      filters: [{ name: t.imageFilter, extensions: ['png', 'jpg', 'jpeg'] }],
     });
     if (typeof picked === 'string') set('logoPath', picked);
   };
@@ -82,7 +84,8 @@ export function SettingsModal({
   };
 
   const backupNow = async () => {
-    const stamp = new Date().toISOString().slice(0, 10);
+    // lokales Datum (toISOString wäre UTC — kurz nach Mitternacht der Vortag)
+    const stamp = todayIso();
     const path = await save({
       defaultPath: `invoices-backup-${stamp}.json`,
       filters: [{ name: 'JSON', extensions: ['json'] }],
@@ -99,7 +102,7 @@ export function SettingsModal({
   const restoreBackup = async () => {
     const picked = await open({ filters: [{ name: 'JSON', extensions: ['json'] }] });
     if (typeof picked !== 'string') return;
-    if (!window.confirm(t.restoreConfirm)) return;
+    if (!(await confirmDialog(t.restoreConfirm, { ok: t.restoreGo, cancel: t.dlgBack }))) return;
     try {
       await api.importBackup(picked);
       // Backend hat Daten UND Einstellungen ersetzt — Modal schließen und
@@ -113,6 +116,7 @@ export function SettingsModal({
 
   const checkUpdates = () => {
     setUpdState('checking');
+    setUpdErr('');
     setUpdate(null);
     api
       .checkUpdate()
@@ -124,7 +128,10 @@ export function SettingsModal({
           setUpdState('none');
         }
       })
-      .catch(() => setUpdState('error'));
+      .catch((e) => {
+        setUpdErr(errText(e, t.errors));
+        setUpdState('error');
+      });
   };
 
   const schemeName = (id: string) => t.schemeNames[id] ?? id;
@@ -188,8 +195,14 @@ export function SettingsModal({
                         key={c.id}
                         className="icon danger"
                         title={`✕ ${c.label}`}
-                        onClick={() => {
-                          if (!window.confirm(t.confirmDeleteCompany)) return;
+                        onClick={async () => {
+                          if (
+                            !(await confirmDialog(t.confirmDeleteCompany, {
+                              ok: t.removeCompany,
+                              cancel: t.dlgBack,
+                            }))
+                          )
+                            return;
                           api
                             .deleteCompany(c.id)
                             .then(() => api.listCompanies().then(setRegistry))
@@ -581,8 +594,8 @@ export function SettingsModal({
                 <span>{t.pdf.total}</span>
               </div>
               <div className="mock-row">
-                <span>Position A</span>
-                <span>119,00 €</span>
+                <span>{t.mockItem} A</span>
+                <span>{fmtMoney(11900, s.language)}</span>
               </div>
               <div
                 className="mock-row"
@@ -591,12 +604,12 @@ export function SettingsModal({
                     s.pdfLayout === 'classic' || s.pdfLayout === 'modern' ? s.pdfC4 : undefined,
                 }}
               >
-                <span>Position B</span>
-                <span>238,00 €</span>
+                <span>{t.mockItem} B</span>
+                <span>{fmtMoney(23800, s.language)}</span>
               </div>
               <div className="mock-total" style={{ color: s.pdfC1, borderColor: s.pdfC2 }}>
                 <span>{t.pdf.grossSum}</span>
-                <span>357,00 €</span>
+                <span>{fmtMoney(35700, s.language)}</span>
               </div>
             </div>
 
@@ -693,7 +706,11 @@ export function SettingsModal({
                 {updState === 'checking' ? t.checking : t.checkUpdates}
               </button>
               {updState === 'none' && <span>{t.upToDate}</span>}
-              {updState === 'error' && <span style={{ color: 'var(--red)' }}>{t.updateError}</span>}
+              {updState === 'error' && (
+                <span style={{ color: 'var(--red)' }} title={updErr}>
+                  {updErr || t.updateError}
+                </span>
+              )}
               {update && (
                 <>
                   <span>
@@ -704,7 +721,11 @@ export function SettingsModal({
                     disabled={installing}
                     onClick={() => {
                       setInstalling(true);
-                      api.installUpdate().catch(() => setInstalling(false));
+                      api.installUpdate().catch((e) => {
+                        setInstalling(false);
+                        setUpdErr(errText(e, t.errors));
+                        setUpdState('error');
+                      });
                     }}
                   >
                     {t.installUpdate}

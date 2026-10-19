@@ -292,8 +292,9 @@ struct Backup {
 }
 
 /// Vollständiges Backup (Belege, Kunden, Artikel, Vorlagen, Zähler,
-/// Einstellungen) als eine JSON-Datei.
-#[tauri::command]
+/// Einstellungen) als eine JSON-Datei. `async`: läuft nicht auf dem
+/// UI-Thread — ein langsames Netz-/UNC-Ziel friert das Fenster nicht ein.
+#[tauri::command(async)]
 pub fn export_backup(st: State<'_, AppState>, path: String) -> Result<(), String> {
     let backup = Backup {
         app: "invoices".into(),
@@ -303,53 +304,79 @@ pub fn export_backup(st: State<'_, AppState>, path: String) -> Result<(), String
         settings: st.settings.lock().unwrap().clone(),
     };
     let path = checked_path(&path, &["json"])?;
-    let json = serde_json::to_string_pretty(&backup).map_err(|e| e.to_string())?;
-    invoices_core::write_atomic(&path, json.as_bytes()).map_err(|e| e.to_string())
+    let json = serde_json::to_string_pretty(&backup).map_err(|e| format!("write-failed: {e}"))?;
+    invoices_core::write_atomic(&path, json.as_bytes()).map_err(|e| format!("write-failed: {e}"))
 }
 
-/// Backup wiederherstellen — ersetzt ALLE Daten und Einstellungen.
-#[tauri::command]
-pub fn import_backup(app: AppHandle, st: State<'_, AppState>, path: String) -> Result<(), String> {
-    let path = std::path::PathBuf::from(&path);
-    let meta = std::fs::metadata(&path).map_err(|e| e.to_string())?;
-    if !meta.is_file() || meta.len() > MAX_BACKUP_BYTES {
-        return Err("backup-invalid".into());
-    }
-    let raw = std::fs::read_to_string(&path).map_err(|_| "backup-invalid".to_string())?;
-    let backup: Backup = serde_json::from_str(&raw).map_err(|_| "backup-invalid".to_string())?;
+/// Backup-Datei lesen und prüfen. Akzeptiert ein UTF-8-BOM (Datei mit
+/// dem Windows-Editor geöffnet und gespeichert).
+fn parse_backup(raw: &[u8]) -> Result<Backup, String> {
+    let raw = raw.strip_prefix(&[0xEF, 0xBB, 0xBF]).unwrap_or(raw);
+    let backup: Backup = serde_json::from_slice(raw).map_err(|_| "backup-invalid".to_string())?;
     if backup.app != "invoices" || backup.backup_version == 0 || backup.backup_version > 1 {
         return Err("backup-invalid".into());
     }
-    // Sicherheitsnetz: aktuellen Stand vor dem Ersetzen neben die
-    // Datenbank legen — eine versehentliche Wiederherstellung ist so
-    // umkehrbar.
-    {
-        let db_path = st.db_path.lock().unwrap().clone();
-        if db_path.exists() {
-            let stamp = chrono::Local::now().format("%Y%m%d-%H%M%S");
-            let _ = std::fs::copy(&db_path, db_path.with_file_name(format!("db.json.before-restore-{stamp}")));
-        }
+    Ok(backup)
+}
+
+/// Backup wiederherstellen — ersetzt ALLE Daten und Einstellungen.
+/// `async`: großes Backup lesen/parsen nicht auf dem UI-Thread.
+#[tauri::command(async)]
+pub fn import_backup(app: AppHandle, st: State<'_, AppState>, path: String) -> Result<(), String> {
+    let path = std::path::PathBuf::from(&path);
+    let meta = std::fs::metadata(&path).map_err(|e| format!("read-failed: {e}"))?;
+    if !meta.is_file() || meta.len() > MAX_BACKUP_BYTES {
+        return Err("backup-invalid".into());
     }
+    let raw = std::fs::read(&path).map_err(|e| format!("read-failed: {e}"))?;
+    let backup = parse_backup(&raw)?;
     let active = st.active_company.lock().unwrap().clone();
-    settings::store_for(&app, &active, &backup.settings)?;
-    *st.db.lock().unwrap() = backup.db;
-    *st.settings.lock().unwrap() = backup.settings;
-    commit(&st)?;
+    restore_into(&st, backup, |s| settings::store_for(&app, &active, s))?;
     let _ = app.emit("db-changed", ());
     Ok(())
 }
 
+/// Kern der Wiederherstellung (testbar ohne AppHandle): Sicherheitskopie,
+/// dann Datenbank, dann Einstellungen. Scheitert die Sicherheitskopie,
+/// bleibt alles unverändert.
+fn restore_into(
+    st: &AppState,
+    backup: Backup,
+    store_settings: impl FnOnce(&Settings) -> Result<(), String>,
+) -> Result<(), String> {
+    // Sicherheitsnetz: aktuellen Stand vor dem Ersetzen neben die
+    // Datenbank legen — eine versehentliche Wiederherstellung ist so
+    // umkehrbar. Klappt das nicht, wird NICHT wiederhergestellt.
+    let db_path = st.db_path.lock().unwrap().clone();
+    if db_path.exists() {
+        let stamp = chrono::Local::now().format("%Y%m%d-%H%M%S");
+        std::fs::copy(&db_path, db_path.with_file_name(format!("db.json.before-restore-{stamp}")))
+            .map_err(|e| format!("restore-safety-failed: {e}"))?;
+    }
+    // Erst die Datenbank auf die Platte, dann die Einstellungen — und den
+    // DB-Lock dabei halten, damit kein parallel laufender Befehl den alten
+    // Speicher-Stand über die wiederhergestellte Datei schreibt.
+    {
+        let mut db = st.db.lock().unwrap();
+        invoices_core::save_db(&backup.db, &db_path).map_err(|e| format!("save-failed: {e}"))?;
+        *db = backup.db;
+    }
+    store_settings(&backup.settings)?;
+    *st.settings.lock().unwrap() = backup.settings;
+    Ok(())
+}
+
 /// Automatisches Backup beim Start (settings.auto_backup): schreibt in den
-/// Backup-Ordner und behält die letzten 10 Stände.
-pub fn auto_backup(st: &AppState) {
+/// Backup-Ordner und behält die letzten 10 Stände. Ein Fehler (Ordner
+/// nicht erreichbar, Platte voll) wird gemeldet, nicht verschluckt.
+pub fn auto_backup(st: &AppState) -> Result<(), String> {
     let settings = st.settings.lock().unwrap().clone();
     if !settings.auto_backup || settings.backup_dir.trim().is_empty() {
-        return;
+        return Ok(());
     }
-    let dir = std::path::PathBuf::from(settings.backup_dir.trim());
-    if std::fs::create_dir_all(&dir).is_err() {
-        return;
-    }
+    let dir = backup_dir_path(&settings.backup_dir)
+        .ok_or_else(|| "auto-backup-failed: bad-path".to_string())?;
+    std::fs::create_dir_all(&dir).map_err(|e| format!("auto-backup-failed: {e}"))?;
     let backup = Backup {
         app: "invoices".into(),
         backup_version: 1,
@@ -358,12 +385,9 @@ pub fn auto_backup(st: &AppState) {
         settings,
     };
     let stamp = chrono::Local::now().format("%Y%m%d-%H%M%S");
-    if let Ok(json) = serde_json::to_string_pretty(&backup) {
-        let _ = invoices_core::write_atomic(
-            &dir.join(format!("invoices-backup-{stamp}.json")),
-            json.as_bytes(),
-        );
-    }
+    let json = serde_json::to_string_pretty(&backup).map_err(|e| format!("auto-backup-failed: {e}"))?;
+    invoices_core::write_atomic(&dir.join(format!("invoices-backup-{stamp}.json")), json.as_bytes())
+        .map_err(|e| format!("auto-backup-failed: {e}"))?;
     // aufräumen: nur die 10 neuesten behalten
     if let Ok(entries) = std::fs::read_dir(&dir) {
         let mut backups: Vec<_> = entries
@@ -379,6 +403,30 @@ pub fn auto_backup(st: &AppState) {
             let _ = std::fs::remove_file(oldest.path());
         }
     }
+    Ok(())
+}
+
+/// Backup-Ordner aus dem (frei editierbaren) Einstellungsfeld: „D:“ ist
+/// unter Windows laufwerks-relativ (aktuelles Verzeichnis auf D:) — gemeint
+/// ist die Wurzel „D:\“. Relative Pfade werden abgelehnt.
+pub(crate) fn backup_dir_path(raw: &str) -> Option<std::path::PathBuf> {
+    let raw = raw.trim();
+    let b = raw.as_bytes();
+    let fixed = if b.len() == 2 && b[0].is_ascii_alphabetic() && b[1] == b':' {
+        format!("{raw}\\")
+    } else {
+        raw.to_string()
+    };
+    let p = std::path::PathBuf::from(fixed);
+    p.is_absolute().then_some(p)
+}
+
+/// Fehler des automatischen Backups beim Start (einmalig abholen) — die
+/// Oberfläche bekommt ihn zusätzlich als Event „backup-failed“, falls sie
+/// schon lauscht.
+#[tauri::command]
+pub fn backup_notice(st: State<'_, AppState>) -> Option<String> {
+    st.backup_error.lock().unwrap().take()
 }
 
 // --- settings & files --------------------------------------------------
@@ -425,7 +473,8 @@ pub fn add_company(
         return Err("bad-label".into());
     }
     let mut registry = crate::companies::load_registry(&app);
-    if registry.list.iter().any(|c| c.id == id) {
+    // Ordnernamen: APFS/NTFS unterscheiden Groß-/Kleinschreibung nicht
+    if registry.list.iter().any(|c| c.id.eq_ignore_ascii_case(&id)) {
         return Err("company-exists".into());
     }
     // Startprofil: leere Firma mit Namen — Einstellungen der aktuellen Firma
@@ -506,13 +555,15 @@ pub fn startup_notice(st: State<'_, AppState>) -> Option<String> {
 /// Write binary data (base64) to a path the user picked via the save dialog.
 /// Nur die Exportformate der App sind erlaubt — der Command ist kein
 /// allgemeiner Datei-Schreiber für beliebige Pfade/Endungen.
-#[tauri::command]
+/// `async`: läuft nicht auf dem UI-Thread (Netzlaufwerk, gesperrte Datei
+/// mit Wiederholversuchen).
+#[tauri::command(async)]
 pub fn write_file(path: String, data_base64: String) -> Result<(), String> {
-    let path = checked_path(&path, &["pdf", "xml", "json", "csv"])?;
+    let path = checked_path(&path, &["pdf", "xml", "json"])?;
     let bytes = base64::engine::general_purpose::STANDARD
         .decode(data_base64)
-        .map_err(|e| e.to_string())?;
-    invoices_core::write_atomic(&path, &bytes).map_err(|e| e.to_string())
+        .map_err(|_| "bad-data".to_string())?;
+    invoices_core::write_atomic(&path, &bytes).map_err(|e| format!("write-failed: {e}"))
 }
 
 /// Logos größer als das sind kein Briefkopf mehr.
@@ -523,7 +574,7 @@ const MAX_BACKUP_BYTES: u64 = 512 * 1024 * 1024;
 
 /// The configured logo as a data URL (for PDF embedding) — None if unset.
 /// Liest nur echte PNG/JPEG-Dateien (Magic Bytes), keine beliebigen Dateien.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_logo(st: State<'_, AppState>) -> Option<String> {
     let path = st.settings.lock().unwrap().logo_path.trim().to_string();
     if path.is_empty() {
@@ -565,10 +616,38 @@ pub(crate) fn checked_path(path: &str, allowed_ext: &[&str]) -> Result<std::path
     if !allowed_ext.contains(&ext.as_str()) {
         return Err("bad-extension".into());
     }
+    if is_reserved_name(&p) {
+        return Err("bad-name".into());
+    }
     if p.is_dir() {
         return Err("bad-path".into());
     }
     Ok(p)
+}
+
+/// Unter Windows reservierte Gerätenamen (CON, NUL, COM1 …) — auch mit
+/// Endung („CON.pdf“) und unabhängig von Groß-/Kleinschreibung. Gilt auf
+/// allen Systemen, damit ein Export nach Windows/SMB nicht scheitert.
+pub(crate) fn is_reserved_name(p: &std::path::Path) -> bool {
+    let Some(name) = p.file_name().map(|n| n.to_string_lossy().to_string()) else {
+        return false;
+    };
+    let stem = name.split('.').next().unwrap_or("").trim_end().to_ascii_uppercase();
+    matches!(stem.as_str(), "CON" | "PRN" | "AUX" | "NUL")
+        || ((stem.starts_with("COM") || stem.starts_with("LPT"))
+            && stem.len() == 4
+            && stem.as_bytes()[3].is_ascii_digit())
+}
+
+/// Dateiname aus einer Belegnummer: Pfadtrenner und unter Windows
+/// verbotene Zeichen werden „-“ (Spiegel von `safeFileName` im Frontend).
+pub(crate) fn safe_file_stem(name: &str) -> String {
+    let cleaned: String = name
+        .chars()
+        .map(|c| if c.is_control() || r#"\/:*?"<>|"#.contains(c) { '-' } else { c })
+        .collect();
+    let cleaned = cleaned.trim().trim_end_matches(['.', ' ']).to_string();
+    if cleaned.is_empty() { "beleg".into() } else { cleaned }
 }
 
 // --- e-invoice ---------------------------------------------------------
@@ -623,7 +702,7 @@ pub fn einvoice_xml(st: State<'_, AppState>, id: String) -> Result<EInvoiceDto, 
         phone: settings.company_phone.clone(),
     };
     let xml = invoices_core::einvoice::einvoice_xml(&doc, &seller, &buyer);
-    let base = doc.number.unwrap_or_else(|| "beleg".into());
+    let base = safe_file_stem(&doc.number.unwrap_or_default());
     Ok(EInvoiceDto {
         xml,
         suggested_name: format!("{base}.xml"),
@@ -643,7 +722,7 @@ pub struct UpdateInfoDto {
 #[tauri::command]
 pub async fn check_update(app: AppHandle) -> Result<Option<UpdateInfoDto>, String> {
     use tauri_plugin_updater::UpdaterExt;
-    let updater = app.updater().map_err(|e| e.to_string())?;
+    let updater = app.updater().map_err(|e| format!("update-check-failed: {e}"))?;
     match updater.check().await {
         Ok(Some(update)) => Ok(Some(UpdateInfoDto {
             version: update.version.clone(),
@@ -651,23 +730,38 @@ pub async fn check_update(app: AppHandle) -> Result<Option<UpdateInfoDto>, Strin
             date: update.date.map(|d| d.to_string()),
         })),
         Ok(None) => Ok(None),
-        Err(e) => Err(format!("Update-Prüfung fehlgeschlagen: {e}")),
+        // Fehlercode statt Klartext — die Oberfläche übersetzt (DE/EN)
+        Err(e) => Err(format!("update-check-failed: {e}")),
     }
 }
 
 #[tauri::command]
 pub async fn install_update(app: AppHandle) -> Result<(), String> {
+    use std::sync::atomic::{AtomicBool, Ordering};
     use tauri_plugin_updater::UpdaterExt;
-    let updater = app.updater().map_err(|e| e.to_string())?;
+    // Banner und Einstellungen können beide „Installieren“ auslösen —
+    // nie zwei Downloads/Installationen gleichzeitig
+    static BUSY: AtomicBool = AtomicBool::new(false);
+    if BUSY.swap(true, Ordering::SeqCst) {
+        return Err("update-busy".into());
+    }
+    struct Release;
+    impl Drop for Release {
+        fn drop(&mut self) {
+            BUSY.store(false, Ordering::SeqCst);
+        }
+    }
+    let _release = Release;
+    let updater = app.updater().map_err(|e| format!("update-check-failed: {e}"))?;
     let update = updater
         .check()
         .await
-        .map_err(|e| format!("Update-Prüfung fehlgeschlagen: {e}"))?
-        .ok_or("Kein Update verfügbar")?;
+        .map_err(|e| format!("update-check-failed: {e}"))?
+        .ok_or("update-none")?;
     update
         .download_and_install(|_, _| {}, || {})
         .await
-        .map_err(|e| format!("Update fehlgeschlagen: {e}"))?;
+        .map_err(|e| format!("update-failed: {e}"))?;
     app.restart();
 }
 
@@ -689,12 +783,165 @@ mod tests {
         assert_eq!(checked_path("", &["pdf"]).unwrap_err(), "bad-path");
     }
 
+    #[test]
+    fn reserved_windows_names_are_rejected() {
+        for bad in ["CON.pdf", "con.pdf", "NUL.xml", "Com1.pdf", "lpt9.json", "AUX.tar.pdf", "CON .pdf"] {
+            assert_eq!(checked_path(&abs(bad), &["pdf", "xml", "json"]).unwrap_err(), "bad-name", "{bad}");
+        }
+        for ok in ["CONTRACT.pdf", "COM10.pdf", "RE-CON-1.pdf", "Rechnung Müller.pdf", "COMX.pdf"] {
+            assert!(checked_path(&abs(ok), &["pdf"]).is_ok(), "{ok}");
+        }
+    }
+
+    #[test]
+    fn suggested_names_are_safe() {
+        assert_eq!(safe_file_stem("RE/2026/0001"), "RE-2026-0001");
+        assert_eq!(safe_file_stem("A:B*C?D\"<E>|F"), "A-B-C-D--E--F");
+        assert_eq!(safe_file_stem("RE-1. "), "RE-1");
+        assert_eq!(safe_file_stem(""), "beleg");
+        assert_eq!(safe_file_stem("Ä\u{7}Ö"), "Ä-Ö");
+    }
+
+    fn backup_json() -> String {
+        let b = Backup {
+            app: "invoices".into(),
+            backup_version: 1,
+            exported_at: "x".into(),
+            db: invoices_core::Db::default(),
+            settings: Settings::default(),
+        };
+        serde_json::to_string(&b).unwrap()
+    }
+
+    #[test]
+    fn backup_with_utf8_bom_is_accepted() {
+        let json = backup_json();
+        assert!(parse_backup(json.as_bytes()).is_ok());
+        let mut bom = vec![0xEF, 0xBB, 0xBF];
+        bom.extend_from_slice(json.as_bytes());
+        assert!(parse_backup(&bom).is_ok());
+        assert_eq!(parse_backup(b"{}").err().as_deref(), Some("backup-invalid"));
+        assert_eq!(
+            parse_backup(json.replace("\"invoices\"", "\"other\"").as_bytes()).err().as_deref(),
+            Some("backup-invalid")
+        );
+    }
+
+    fn test_state(dir: &std::path::Path) -> AppState {
+        AppState {
+            db: std::sync::Mutex::new(invoices_core::Db::default()),
+            settings: std::sync::Mutex::new(Settings::default()),
+            db_path: std::sync::Mutex::new(dir.join("db.json")),
+            active_company: std::sync::Mutex::new("default".into()),
+            quarantined: std::sync::Mutex::new(None),
+            backup_error: std::sync::Mutex::new(None),
+        }
+    }
+
+    #[test]
+    fn restore_writes_db_and_settings_and_keeps_a_safety_copy() {
+        let dir = std::env::temp_dir().join(format!("invoices-rs-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let st = test_state(&dir);
+        st.persist().unwrap();
+        let mut backup = parse_backup(backup_json().as_bytes()).unwrap();
+        backup.db.customers.push(invoices_core::Customer { id: "c1".into(), name: "Müller".into(), ..Default::default() });
+        backup.settings.company_name = "Restored GmbH".into();
+        let mut stored = None;
+        restore_into(&st, backup, |s| {
+            stored = Some(s.company_name.clone());
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(stored.as_deref(), Some("Restored GmbH"));
+        assert_eq!(st.db.lock().unwrap().customers.len(), 1);
+        assert_eq!(st.settings.lock().unwrap().company_name, "Restored GmbH");
+        let on_disk = invoices_core::try_load_db(&dir.join("db.json")).ok().unwrap();
+        assert_eq!(on_disk.customers.len(), 1);
+        let copies = std::fs::read_dir(&dir)
+            .unwrap()
+            .filter(|e| e.as_ref().unwrap().file_name().to_string_lossy().starts_with("db.json.before-restore-"))
+            .count();
+        assert_eq!(copies, 1);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn restore_aborts_without_safety_copy() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("invoices-rs2-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let st = test_state(&dir);
+        st.persist().unwrap();
+        // Ordner schreibgeschützt → keine Sicherheitskopie möglich
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o555)).unwrap();
+        let mut backup = parse_backup(backup_json().as_bytes()).unwrap();
+        backup.settings.company_name = "X".into();
+        let res = restore_into(&st, backup, |_| panic!("settings must not be stored"));
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o755)).unwrap();
+        if let Err(e) = res {
+            assert!(e.starts_with("restore-safety-failed"), "{e}");
+            assert_eq!(st.settings.lock().unwrap().company_name, "");
+        } else {
+            // als root laufen Rechte ins Leere — dann ist nichts zu prüfen
+            eprintln!("skipped: permissions not enforced");
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn relative_backup_dirs_are_rejected() {
+        assert_eq!(backup_dir_path(""), None);
+        assert_eq!(backup_dir_path("backups"), None);
+        #[cfg(unix)]
+        {
+            assert_eq!(backup_dir_path("D:"), None); // auf Unix kein Laufwerk
+            assert_eq!(backup_dir_path(" /tmp/x "), Some(std::path::PathBuf::from("/tmp/x")));
+        }
+    }
+
+    #[test]
+    fn auto_backup_reports_unreachable_folder() {
+        // Backup-Ordner unter einer Datei → create_dir_all scheitert
+        let base = std::env::temp_dir().join(format!("invoices-ab-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&base);
+        let file = base.join("not-a-dir");
+        std::fs::write(&file, b"x").unwrap();
+        let mut s = Settings::default();
+        s.auto_backup = true;
+        s.backup_dir = file.join("sub").to_string_lossy().to_string();
+        let st = AppState {
+            db: std::sync::Mutex::new(invoices_core::Db::default()),
+            settings: std::sync::Mutex::new(s),
+            db_path: std::sync::Mutex::new(base.join("db.json")),
+            active_company: std::sync::Mutex::new("default".into()),
+            quarantined: std::sync::Mutex::new(None),
+            backup_error: std::sync::Mutex::new(None),
+        };
+        assert!(auto_backup(&st).unwrap_err().starts_with("auto-backup-failed"));
+        // funktionierender Ordner (mit Umlaut und Leerzeichen): Datei entsteht
+        let good = base.join("Sicherung Müller");
+        st.settings.lock().unwrap().backup_dir = good.to_string_lossy().to_string();
+        auto_backup(&st).unwrap();
+        let n = std::fs::read_dir(&good).unwrap().count();
+        assert_eq!(n, 1);
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
     #[cfg(windows)]
     #[test]
     fn checked_path_accepts_windows_paths() {
         assert!(checked_path(r"C:\Users\x\Documents\RE-1.pdf", &["pdf"]).is_ok());
         assert!(checked_path(r"\\nas\share\backup.json", &["json"]).is_ok());
         assert_eq!(checked_path(r"C:\x\a.exe", &["pdf"]).unwrap_err(), "bad-extension");
+        assert!(checked_path(r"D:\RE-2026-0001.pdf", &["pdf"]).is_ok());
+        assert_eq!(checked_path(r"C:RE-1.pdf", &["pdf"]).unwrap_err(), "bad-path");
+        assert_eq!(checked_path(r"C:\Users\x\CON.pdf", &["pdf"]).unwrap_err(), "bad-name");
+        assert_eq!(backup_dir_path("D:"), Some(std::path::PathBuf::from(r"D:\")));
+        assert!(backup_dir_path(r"\\nas\share\backups").is_some());
     }
 
     #[test]
@@ -733,6 +980,7 @@ mod tests {
             db_path: std::sync::Mutex::new(missing_dir.join("db.json")),
             active_company: std::sync::Mutex::new("default".into()),
             quarantined: std::sync::Mutex::new(None),
+            backup_error: std::sync::Mutex::new(None),
         };
         assert!(commit(&st).unwrap_err().starts_with("save-failed"));
         assert!(st.db.lock().unwrap().customers.is_empty());

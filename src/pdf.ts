@@ -202,6 +202,10 @@ export function buildPdf(
     [t.pdf.number, doc.number ?? '—'],
     [t.pdf.date, fmtDate(doc.date, lang)],
   ];
+  // Leistungsdatum (§14 UStG) auf Rechnung, Gutschrift und Storno —
+  // leer heißt „wie Belegdatum“
+  if (doc.kind === 'invoice' || doc.kind === 'creditnote' || doc.kind === 'cancellation')
+    meta.push([t.pdf.serviceDate, fmtDate(doc.serviceDate || doc.date, lang)]);
   if (doc.kind === 'invoice') meta.push([t.pdf.due, fmtDate(doc.dueDate, lang)]);
   if (doc.kind === 'quote') meta.push([t.pdf.validUntil, fmtDate(doc.dueDate, lang)]);
   if (doc.kind === 'cancellation' && relatedNumber) meta.push([t.pdf.cancels, relatedNumber]);

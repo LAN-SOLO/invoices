@@ -80,18 +80,17 @@ Legende Teststatus:
 | geprüft | Kein `dangerouslySetInnerHTML`, kein `eval`, keine Shell-/Command-Aufrufe, keine HTTP-Requests außer Updater | ok |
 | geprüft | localStorage nur `invoices.tutorialSeen` | ok |
 | geprüft | Kein TLS-Abschalten, keine Secrets im Code | ok |
-| nicht geprüft | `cargo audit` (nicht installiert) | offen |
+| geprüft (Runde 2) | `cargo audit`: rustls 0.23.43 → 0.23.46 (4 Advisories behoben); verbleibend `zip` 4.6.1 (über tauri-plugin-updater, nur `extract()` betroffen — der Updater lädt signierte DMG/MSI/NSIS-Artefakte, nicht erreichbar) und Unmaintained-Warnungen (unic-*, proc-macro-error, zbus_names) | ok / akzeptiert |
 
 ## 4. Bekannte Grenzen
 
 - **ZUGFeRD-PDF ist nicht streng PDF/A-3b-konform:** veraPDF meldet 2 Regelverstöße (Klausel 6.2.11.4.1, Helvetica nicht eingebettet). Das eingebettete XML ist EN-16931-valide. Lösung: eigene TTF-Schrift einbetten (1.1).
 - **XRechnung im engeren Sinn (KoSIT-CIUS):** Das XML nutzt die Kennung `urn:cen.eu:en16931:2017` (Factur-X/ZUGFeRD EN 16931). Behördenportale, die die XRechnung-CIUS-Kennung und deren Zusatzregeln (BR-DE-*) verlangen, können es ablehnen.
-- **Kein eigenes Leistungsdatum:** Das Belegdatum gilt als Rechnungsdatum; den Leistungszeitraum bitte in die Positionsbeschreibung schreiben (§14 UStG).
-- **Kopfzeile ApplicableHeaderTradeDelivery bleibt leer** (Warnung PEPPOL-EN16931-R008, kein Fehler).
+- ~~Kein eigenes Leistungsdatum / leere ApplicableHeaderTradeDelivery~~ — in Runde 2 behoben (Feld „Leistungsdatum“, BT-72). Ein Leistungs*zeitraum* (BG-14) wird weiterhin über die Positionsbeschreibung abgebildet.
 - **Sprache beim Erststart:** Das Backend liest `LANG` (unter Windows und bei Finder/Dock-Start unter macOS nicht gesetzt); seit der Verifikation übernimmt das Frontend beim Erststart `navigator.language` der Webview. Auf beiden Systemen manuell prüfen (Testliste Punkt 1).
 - **Kundenlöschen:** E-Mail/USt-IdNr./Leitweg-ID der E-Rechnung kommen live aus der Kundenkartei; nach dem Löschen eines Kunden fehlen sie in später exportierten E-Rechnungen (Name/Anschrift bleiben als Snapshot).
 - **jsPDF-Standardschriften (WinAnsi):** Zeichen außerhalb Westeuropas (z. B. ł, ő, kyrillisch) werden im PDF falsch dargestellt.
-- **Windows-Kompilat** konnte lokal nicht geprüft werden (`ring` lässt sich ohne MSVC nicht cross-kompilieren); `invoices-core` kompiliert für `x86_64-pc-windows-msvc`. Der CI-Build ist der Nachweis.
+- **Windows-Kompilat:** Seit Runde 2 läuft `cargo check --target x86_64-pc-windows-msvc --workspace --tests` lokal fehlerfrei (C-Teile mit Stub-Headern, ohne Linken). Gelinkt, ausgeführt und paketiert wird nur in der CI.
 - **Kein Mahnwesen, keine wiederkehrenden Rechnungen, kein CSV-Export** (Roadmap, `INVOICES_PLAN.md`).
 
 ## 5. Manuelle Testliste (macOS und Windows)
@@ -123,7 +122,7 @@ Jeweils mit frischem Profil **und** mit einem Datenstand aus 0.4.0 (Update-Pfad)
 
 ```sh
 pnpm build                      # tsc + vite build — fehlerfrei
-cargo test --workspace          # 29 Core-Tests + 5 Backend-Tests (+1 nur unter Windows)
+cargo test --workspace          # 34 Core-Tests + 12 Backend-Tests (+1 nur unter Windows)
 INVOICES_XML_DUMP=<ordner> cargo test -p invoices-core dump   # Beispiel-XMLs für Validatoren
 java -jar Mustang-CLI-2.26.0.jar --action validate --source <ordner>/invoice.xml
 ```
@@ -153,3 +152,38 @@ Zusätzlich behoben:
 6. **Erststart-Sprache:** siehe oben — `navigator.language` wird beim allerersten Start übernommen (nur wenn noch kein Firmenname gesetzt und das Tutorial nie gesehen wurde).
 
 Nur statisch geprüft (braucht einen Menschen bzw. echtes System): Punkte 4–6 oben im laufenden Tauri-Fenster, native Dialoge mit Umlaut-/Leerzeichen-/Laufwerkspfaden, Windows-Kompilat (nur CI), Mustang/veraPDF-Ergebnisse der Erstprüfung wurden nicht wiederholt (Werkzeuge nicht mehr vorhanden).
+
+## 8. Runde 2 (2026-10-20)
+
+Ausgangsstand `753bb3e`. Abgearbeitet: Resteliste der Runde 1 und die Fehlermuster L1–L13 aus den anderen Apps.
+
+Behoben:
+
+1. **L1 — `window.confirm`/`window.alert`:** tauri-plugin-dialog 2.7 ersetzt sie durch asynchrone Stubs; `if (window.confirm(…))` war damit **immer wahr** — Storno, Entwurf/Kunde/Artikel/Vorlage löschen, Firma entfernen und Backup wiederherstellen liefen auch bei „Abbrechen“; der Quarantäne-Hinweis (`window.alert`) erschien nie. Jetzt `src/dialogs.ts` (`confirm()`/`message()` des Plugins, immer mit `await`, Knöpfe mit eindeutigen Texten wie „Stornieren“/„Abbrechen“; schlägt der Dialog fehl, wird NICHT ausgeführt). Berechtigung `dialog:default` enthält `allow-message`. Rückgabewert gegen rfd 0.16 (macOS/Windows) geprüft: Rust liefert den Text des geklickten Knopfs.
+2. **L2 — Backend-Fehler roh/deutsch:** Update-Fehler kamen als deutscher Klartext („Update-Prüfung fehlgeschlagen: …“) auch in der englischen Oberfläche; `write_file`/`export_backup` lieferten rohe OS-Texte. Jetzt nur Fehlercodes (`write-failed`, `read-failed`, `bad-name`, `bad-data`, `doc-bad-date`, `auto-backup-failed`, `restore-safety-failed`, `update-check-failed`, `update-failed`, `update-none`, `update-busy`), alle DE/EN übersetzt; `errText()` hängt das OS-Detail in Klammern an. Vorschau-Export zeigte `String(e)` — jetzt übersetzt. Installationsfehler im Update-Banner/Auto-Update wurden verschluckt — jetzt angezeigt.
+3. **L4 — Backup mit UTF-8-BOM** (Windows-Editor) wurde als „kein gültiges Backup“ abgelehnt; jetzt akzeptiert (Test). CSV-Export gibt es nicht; `csv` wurde aus den erlaubten `write_file`-Endungen entfernt.
+4. **L5 — Dateisystem:** reservierte Windows-Namen (CON, NUL, COM1 … auch mit Endung) werden im Backend abgelehnt (`bad-name`); Backup-Ordner „D:“ wird zu „D:\“, relative Backup-Ordner werden abgelehnt; `write_atomic` nutzt eindeutige Temp-Namen (parallele Exporte auf dasselbe Ziel kollidieren nicht mehr) und räumt eine halb geschriebene Temp-Datei weg; vorgeschlagene XML-Dateinamen werden auch im Backend bereinigt; Firmen-IDs werden ohne Groß-/Kleinschreibung verglichen (APFS/NTFS).
+5. **L8/L9 — Hauptthread:** `write_file`, `export_backup`, `import_backup`, `get_logo` laufen als `async`-Befehle im Thread-Pool (Netzlaufwerk/gesperrte Datei friert das Fenster nicht ein). Wiederherstellung hält dabei den DB-Lock, schreibt erst die Datenbank, dann die Einstellungen — kein paralleler Befehl kann den alten Stand darüberschreiben. Doppeltes „Installieren“ (Banner + Einstellungen) wird im Backend abgewiesen.
+6. **L10 — Datum:** Dateiname „Backup jetzt erstellen“ nutzte das UTC-Datum (`toISOString`) — kurz nach Mitternacht der Vortag; jetzt lokal. Geleertes Belegdatum ergab ein Fälligkeitsdatum „NaN-NaN-NaN“, und festgeschrieben wurde trotzdem (Belegdatum leer in PDF und E-Rechnung); jetzt prüft `finalize` Beleg-, Fälligkeits- und Leistungsdatum (`doc-bad-date`, inkl. Schaltjahr), es wird keine Nummer verbraucht (Tests).
+7. **L11 — stille Fehler:** Auto-Backup-Fehler (Ordner nicht erreichbar) wurden verschluckt — jetzt Hinweis beim Start (`backup_notice` + Event `backup-failed`). Wiederherstellung lief weiter, wenn die Sicherheitskopie `db.json.before-restore-*` nicht angelegt werden konnte — jetzt Abbruch ohne Änderung (Test). Kunde aus dem Editor anlegen hatte kein `catch`. „Zurück zur Liste“ verwarf ungespeicherte Entwurfsänderungen ohne Rückfrage — jetzt Rückfrage. Kaputtes Logo konnte die Vorschau abstürzen lassen — jetzt Fehlermeldung.
+8. **L12 — Texte:** Löschknöpfe für Kunden, Artikel, Vorlagen und Positionen hießen „Entwurf löschen“ — jetzt „Löschen“; Dateifilter „Bild“ und die Musterzeilen der Layout-Vorschau („Position A“, „119,00 €“) waren hart deutsch; „1 Belege“ → „1 Beleg“; `<html lang>` folgt der Sprache; Summenspalte bricht nicht mehr um. Hilfe DE/EN um Leistungsdatum, Rückfragen, Auto-Backup-Fehler, Sicherheitskopie, BOM und reservierte Namen ergänzt.
+9. **Leistungsdatum (Rest aus Runde 1):** neues Feld für Rechnung/Gutschrift (Storno übernimmt das des Originals), leer = Belegdatum; steht auf dem PDF und als BT-72 (`ActualDeliverySupplyChainEvent`) in XRechnung/ZUGFeRD. Alte Datenbanken laden unverändert (`serde(default)`).
+
+Geprüft ohne Befund: L3 (Erststart-Sprache, im Browser mit `navigator.language` en-US/de-DE nachgestellt), L6 (keine Tastenkürzel-Beschriftungen), L7 (keine Fremdinhalte; Vorschau ist eine lokale `blob:`-PDF, CSP `frame-src blob:`), L13 (Endpoint/Pubkey gesetzt, Versionsvergleich macht das Plugin, Fehler jetzt in UI-Sprache).
+
+Ausgeführt:
+
+- `cargo test --workspace`: **12 Backend- + 34 Core-Tests grün** (neu u. a. reservierte Namen, BOM-Backup, Auto-Backup-Fehler, Wiederherstellung mit/ohne Sicherheitskopie, Datumsprüfung, Leistungsdatum im XML/Storno, parallele atomare Schreibvorgänge).
+- `cargo check --target x86_64-pc-windows-msvc --workspace --tests`: fehlerfrei (inkl. `#[cfg(windows)]`-Tests, die nur kompiliert, nicht ausgeführt wurden).
+- `pnpm build` (tsc + vite): fehlerfrei.
+- UI im Headless-Chromium (900 × 580 = Mindestfenstergröße, DE/EN × Hell/Dunkel, gemockte IPC mit Plugin-2.7-Verhalten, `window.confirm` als Falle): 51 Prüfungen je Kombination grün — Kunde anlegen, Löschen abbrechen, Rechnung mit Leistungsdatum, geleertes Datum → übersetzter Fehler ohne Nummer, Zurück mit Änderungen → Rückfrage, Vorschau, PDF-Export auf gesperrte Datei → übersetzte Meldung, Storno/Entwurf löschen mit Abbrechen und OK, Wiederherstellen ohne Sicherheitskopie, Update-Fehler, keine Überläufe, keine Fremdsprach-Reste.
+
+Offen / nicht in Code lösbar:
+
+- PDF/A-3b (Schrift einbetten), XRechnung-CIUS-Kennung, jsPDF-4-Upgrade — wie in Abschnitt 3/4.
+- Echte Tauri-IPC end-to-end, native Dialoge (Knopftexte, Esc = Abbrechen), WebView2-Vorschau, gesperrte Dateien/AV-Scanner, UNC-/NAS-Backup-Ordner, Installer und Updater: nur auf echter Hardware prüfbar. Zusätzlich zur Testliste:
+  21. Storno, Entwurf löschen, Kunde löschen, Firma entfernen, Backup wiederherstellen: jeweils **„Abbrechen“ und Esc** → nichts passiert; „Stornieren“/„Löschen“ → Aktion läuft (macOS und Windows).
+  22. Auto-Backup-Ordner auf ein abgezogenes Laufwerk/aus geschaltetes NAS → beim Start Hinweis, Fenster bleibt bedienbar.
+  23. Leistungsdatum setzen, festschreiben, ZUGFeRD exportieren → im Viewer/Validator BT-72 vorhanden; ohne Leistungsdatum = Belegdatum.
+  24. Windows: Export als `CON.pdf` → Meldung „reserviert“.
+
