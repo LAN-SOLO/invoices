@@ -124,14 +124,28 @@ fn sys_locale_is_german() -> bool {
 }
 
 pub fn load_for(app: &tauri::AppHandle, company_id: &str) -> Settings {
-    std::fs::read_to_string(crate::companies::settings_path(app, company_id))
-        .ok()
-        .and_then(|s| serde_json::from_str(&s).ok())
-        .unwrap_or_default()
+    let path = crate::companies::settings_path(app, company_id);
+    let Ok(raw) = std::fs::read_to_string(&path) else {
+        return Settings::default();
+    };
+    match serde_json::from_str(&raw) {
+        Ok(s) => s,
+        Err(_) => {
+            // unlesbare Einstellungen nicht still überschreiben — Kopie
+            // zur Seite legen, dann mit Standardwerten weiter
+            let stamp = chrono::Local::now().format("%Y%m%d-%H%M%S");
+            let name = path
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_else(|| "settings.json".into());
+            let _ = std::fs::copy(&path, path.with_file_name(format!("{name}.corrupt-{stamp}")));
+            Settings::default()
+        }
+    }
 }
 
-pub fn store_for(app: &tauri::AppHandle, company_id: &str, settings: &Settings) {
-    if let Ok(json) = serde_json::to_string_pretty(settings) {
-        let _ = std::fs::write(crate::companies::settings_path(app, company_id), json);
-    }
+pub fn store_for(app: &tauri::AppHandle, company_id: &str, settings: &Settings) -> Result<(), String> {
+    let json = serde_json::to_string_pretty(settings).map_err(|e| e.to_string())?;
+    invoices_core::write_atomic(&crate::companies::settings_path(app, company_id), json.as_bytes())
+        .map_err(|e| format!("save-failed: {e}"))
 }

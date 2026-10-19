@@ -52,10 +52,20 @@ pub fn load_registry(app: &tauri::AppHandle) -> Registry {
         .unwrap_or_default()
 }
 
-pub fn store_registry(app: &tauri::AppHandle, registry: &Registry) {
-    if let Ok(json) = serde_json::to_string_pretty(registry) {
-        let _ = std::fs::write(registry_path(app), json);
-    }
+pub fn store_registry(app: &tauri::AppHandle, registry: &Registry) -> Result<(), String> {
+    let json = serde_json::to_string_pretty(registry).map_err(|e| e.to_string())?;
+    invoices_core::write_atomic(&registry_path(app), json.as_bytes())
+        .map_err(|e| format!("save-failed: {e}"))
+}
+
+/// Firmen-IDs werden Teil von Datei- und Ordnernamen — nur ASCII-
+/// Buchstaben, Ziffern und Bindestrich (UUID-Form), damit kein `..`,
+/// Pfadtrenner oder Laufwerksbuchstabe aus der Oberfläche ins Dateisystem
+/// durchschlägt.
+pub fn valid_id(id: &str) -> bool {
+    !id.is_empty()
+        && id.len() <= 64
+        && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
 }
 
 /// Einstellungs-Datei je Firma — "default" behält den Alt-Namen.

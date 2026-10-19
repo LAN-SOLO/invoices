@@ -22,13 +22,34 @@ pub struct Seller {
     pub bank_name: String,
     /// ISO-3166-Code, leer = "DE".
     pub country: String,
+    /// Telefon für den Verkäufer-Kontakt (BT-42).
+    pub phone: String,
 }
 
+/// Käufer-Angaben, die nicht im Beleg-Snapshot stecken (aus der Kundenkartei).
+#[derive(Debug, Clone, Default)]
+pub struct Buyer {
+    /// Leitweg-ID bzw. Käufer-Referenz (BT-10).
+    pub reference: String,
+    /// ISO-3166-Code, leer = "DE".
+    pub country: String,
+    /// USt-IdNr. des Käufers (BT-48).
+    pub vat_id: String,
+    /// E-Mail als elektronische Adresse des Käufers (BT-49).
+    pub email: String,
+}
+
+/// XML-Escaping für Text und Attribute; Steuerzeichen (außer Tab/Zeilen-
+/// umbruch), die XML 1.0 verbietet, werden entfernt.
 fn esc(s: &str) -> String {
-    s.replace('&', "&amp;")
+    s.chars()
+        .filter(|c| !c.is_control() || matches!(c, '\t' | '\n' | '\r'))
+        .collect::<String>()
+        .replace('&', "&amp;")
         .replace('<', "&lt;")
         .replace('>', "&gt;")
         .replace('"', "&quot;")
+        .replace('\'', "&apos;")
 }
 
 /// "1234,50 €"-Cents → "1234.50" (EN 16931 verlangt Dezimalpunkt).
@@ -88,12 +109,51 @@ pub fn split_address(address: &str) -> (Vec<String>, Option<(String, String)>) {
     (lines, post_city)
 }
 
-fn party_xml(role: &str, name: &str, address: &str, country: &str, vat_id: &str) -> String {
+struct Party<'a> {
+    role: &'a str,
+    name: &'a str,
+    address: &'a str,
+    country: &'a str,
+    vat_id: &'a str,
+    /// Steuernummer (schemeID "FC") — nur beim Verkäufer.
+    tax_number: &'a str,
+    email: &'a str,
+    /// Kontakt (Name/Telefon/E-Mail) — nur beim Verkäufer.
+    contact: Option<(&'a str, &'a str)>,
+}
+
+fn party_xml(p: &Party) -> String {
+    let Party { role, name, address, country, vat_id, .. } = *p;
     let (lines, post_city) = split_address(address);
     let country = if country.trim().is_empty() { "DE" } else { country.trim() };
     let mut out = String::new();
     out.push_str(&format!("<ram:{role}>"));
+    if vat_id.trim().is_empty() && !p.tax_number.trim().is_empty() {
+        // BR-CO-26: ohne USt-IdNr. braucht der Verkäufer eine Kennung
+        // (BT-29) — typischer Fall Kleinunternehmer; die Steuernummer dient
+        // dann als Verkäufer-Kennung.
+        out.push_str(&format!("<ram:ID>{}</ram:ID>", esc(p.tax_number.trim())));
+    }
     out.push_str(&format!("<ram:Name>{}</ram:Name>", esc(name)));
+    if let Some((phone, email)) = p.contact {
+        if !phone.trim().is_empty() || !email.trim().is_empty() {
+            out.push_str("<ram:DefinedTradeContact>");
+            out.push_str(&format!("<ram:PersonName>{}</ram:PersonName>", esc(name)));
+            if !phone.trim().is_empty() {
+                out.push_str(&format!(
+                    "<ram:TelephoneUniversalCommunication><ram:CompleteNumber>{}</ram:CompleteNumber></ram:TelephoneUniversalCommunication>",
+                    esc(phone.trim())
+                ));
+            }
+            if !email.trim().is_empty() {
+                out.push_str(&format!(
+                    "<ram:EmailURIUniversalCommunication><ram:URIID>{}</ram:URIID></ram:EmailURIUniversalCommunication>",
+                    esc(email.trim())
+                ));
+            }
+            out.push_str("</ram:DefinedTradeContact>");
+        }
+    }
     out.push_str("<ram:PostalTradeAddress>");
     if let Some((post, _)) = &post_city {
         out.push_str(&format!("<ram:PostcodeCode>{}</ram:PostcodeCode>", esc(post)));
@@ -109,6 +169,21 @@ fn party_xml(role: &str, name: &str, address: &str, country: &str, vat_id: &str)
     }
     out.push_str(&format!("<ram:CountryID>{}</ram:CountryID>", esc(country)));
     out.push_str("</ram:PostalTradeAddress>");
+    if !p.email.trim().is_empty() {
+        // elektronische Adresse (BT-34/BT-49), Schema EM = E-Mail
+        out.push_str(&format!(
+            "<ram:URIUniversalCommunication><ram:URIID schemeID=\"EM\">{}</ram:URIID></ram:URIUniversalCommunication>",
+            esc(p.email.trim())
+        ));
+    }
+    if !p.tax_number.trim().is_empty() {
+        // Steuernummer (BT-32) — Pflicht, wenn keine USt-IdNr. vorhanden ist
+        // (BR-CO-26), etwa bei Kleinunternehmern
+        out.push_str(&format!(
+            "<ram:SpecifiedTaxRegistration><ram:ID schemeID=\"FC\">{}</ram:ID></ram:SpecifiedTaxRegistration>",
+            esc(p.tax_number.trim())
+        ));
+    }
     if !vat_id.trim().is_empty() {
         out.push_str(&format!(
             "<ram:SpecifiedTaxRegistration><ram:ID schemeID=\"VA\">{}</ram:ID></ram:SpecifiedTaxRegistration>",
@@ -132,7 +207,7 @@ fn type_code(kind: DocKind) -> &'static str {
 }
 
 /// Erzeugt das vollständige CII-XML für einen festgeschriebenen Beleg.
-pub fn einvoice_xml(doc: &Doc, seller: &Seller, buyer_reference: &str, buyer_country: &str) -> String {
+pub fn einvoice_xml(doc: &Doc, seller: &Seller, buyer: &Buyer) -> String {
     let sums = totals(&doc.items, doc.small_business);
     let currency = "EUR";
     let number = doc.number.clone().unwrap_or_else(|| "ENTWURF".into());
@@ -181,16 +256,24 @@ pub fn einvoice_xml(doc: &Doc, seller: &Seller, buyer_reference: &str, buyer_cou
             ));
         }
         xml.push_str("</ram:SpecifiedTradeProduct>");
+        // EN 16931 BR-27: der Netto-Preis darf nie negativ sein — Storno-
+        // Positionen (negierter Preis) werden als negative Menge zum
+        // positiven Preis ausgedrückt; der Zeilenbetrag bleibt identisch.
+        let (price, quantity) = if item.unit_price_cents < 0 {
+            (-item.unit_price_cents, -item.quantity)
+        } else {
+            (item.unit_price_cents, item.quantity)
+        };
         xml.push_str(&format!(
             "<ram:SpecifiedLineTradeAgreement><ram:NetPriceProductTradePrice>\
              <ram:ChargeAmount>{}</ram:ChargeAmount>\
              </ram:NetPriceProductTradePrice></ram:SpecifiedLineTradeAgreement>",
-            amount(item.unit_price_cents)
+            amount(price)
         ));
         xml.push_str(&format!(
             "<ram:SpecifiedLineTradeDelivery><ram:BilledQuantity unitCode=\"{}\">{}</ram:BilledQuantity></ram:SpecifiedLineTradeDelivery>",
             unit_code(&item.unit),
-            qty(item.quantity)
+            qty(quantity)
         ));
         let (category, rate) = if doc.small_business {
             ("E", 0)
@@ -217,26 +300,32 @@ pub fn einvoice_xml(doc: &Doc, seller: &Seller, buyer_reference: &str, buyer_cou
 
     // Vertragsparteien
     xml.push_str("<ram:ApplicableHeaderTradeAgreement>");
-    if !buyer_reference.trim().is_empty() {
+    if !buyer.reference.trim().is_empty() {
         xml.push_str(&format!(
             "<ram:BuyerReference>{}</ram:BuyerReference>",
-            esc(buyer_reference.trim())
+            esc(buyer.reference.trim())
         ));
     }
-    xml.push_str(&party_xml(
-        "SellerTradeParty",
-        &seller.name,
-        &seller.address,
-        &seller.country,
-        &seller.vat_id,
-    ));
-    xml.push_str(&party_xml(
-        "BuyerTradeParty",
-        &doc.customer_name,
-        &doc.customer_address,
-        buyer_country,
-        "",
-    ));
+    xml.push_str(&party_xml(&Party {
+        role: "SellerTradeParty",
+        name: &seller.name,
+        address: &seller.address,
+        country: &seller.country,
+        vat_id: &seller.vat_id,
+        tax_number: &seller.tax_number,
+        email: &seller.email,
+        contact: Some((&seller.phone, &seller.email)),
+    }));
+    xml.push_str(&party_xml(&Party {
+        role: "BuyerTradeParty",
+        name: &doc.customer_name,
+        address: &doc.customer_address,
+        country: &buyer.country,
+        vat_id: &buyer.vat_id,
+        tax_number: "",
+        email: &buyer.email,
+        contact: None,
+    }));
     xml.push_str("</ram:ApplicableHeaderTradeAgreement>");
 
     xml.push_str("<ram:ApplicableHeaderTradeDelivery/>");
@@ -308,7 +397,9 @@ pub fn einvoice_xml(doc: &Doc, seller: &Seller, buyer_reference: &str, buyer_cou
             ));
         }
     }
-    if doc.kind == DocKind::Invoice && !doc.due_date.trim().is_empty() {
+    // Fälligkeit (BT-9): bei Rechnungen und überall dort, wo ein positiver
+    // Betrag fällig ist (BR-CO-25 verlangt dann Fälligkeit oder Bedingungen)
+    if !doc.due_date.trim().is_empty() && (doc.kind == DocKind::Invoice || sums.gross_cents > 0) {
         xml.push_str(&format!(
             "<ram:SpecifiedTradePaymentTerms><ram:DueDateDateTime>\
              <udt:DateTimeString format=\"102\">{}</udt:DateTimeString>\
@@ -362,7 +453,12 @@ mod tests {
             bic: "COBADEFFXXX".into(),
             bank_name: "Commerzbank".into(),
             country: String::new(),
+            phone: "+49 40 123456".into(),
         }
+    }
+
+    fn buyer(reference: &str) -> Buyer {
+        Buyer { reference: reference.into(), ..Default::default() }
     }
 
     fn doc() -> Doc {
@@ -399,7 +495,7 @@ mod tests {
 
     #[test]
     fn xml_contains_mandatory_fields_and_sums() {
-        let xml = einvoice_xml(&doc(), &seller(), "04011000-1234-56", "");
+        let xml = einvoice_xml(&doc(), &seller(), &buyer("04011000-1234-56"));
         assert!(xml.contains("urn:cen.eu:en16931:2017"));
         assert!(xml.contains("<ram:ID>RE-2026-0001</ram:ID>"));
         assert!(xml.contains("<ram:TypeCode>380</ram:TypeCode>"));
@@ -429,7 +525,7 @@ mod tests {
     fn small_business_uses_category_e_with_reason() {
         let mut d = doc();
         d.small_business = true;
-        let xml = einvoice_xml(&d, &seller(), "", "");
+        let xml = einvoice_xml(&d, &seller(), &buyer(""));
         assert!(xml.contains("<ram:CategoryCode>E</ram:CategoryCode>"));
         assert!(xml.contains("§19 UStG"));
         assert!(!xml.contains("<ram:CategoryCode>S</ram:CategoryCode>"));
@@ -442,9 +538,9 @@ mod tests {
     fn credit_note_and_cancellation_type_codes() {
         let mut d = doc();
         d.kind = DocKind::CreditNote;
-        assert!(einvoice_xml(&d, &seller(), "", "").contains("<ram:TypeCode>381</ram:TypeCode>"));
+        assert!(einvoice_xml(&d, &seller(), &buyer("")).contains("<ram:TypeCode>381</ram:TypeCode>"));
         d.kind = DocKind::Cancellation;
-        assert!(einvoice_xml(&d, &seller(), "", "").contains("<ram:TypeCode>384</ram:TypeCode>"));
+        assert!(einvoice_xml(&d, &seller(), &buyer("")).contains("<ram:TypeCode>384</ram:TypeCode>"));
     }
 
     #[test]
@@ -465,7 +561,101 @@ mod tests {
         for item in &mut d.items {
             item.unit_price_cents = -item.unit_price_cents;
         }
-        let xml = einvoice_xml(&d, &seller(), "", "");
+        let xml = einvoice_xml(&d, &seller(), &buyer(""));
         assert!(xml.contains("<ram:GrandTotalAmount>-182.05</ram:GrandTotalAmount>"));
+        // BR-27: Preise nie negativ — das Vorzeichen wandert in die Menge
+        assert!(!xml.contains("<ram:ChargeAmount>-"));
+        assert!(xml.contains("<ram:ChargeAmount>90.00</ram:ChargeAmount>"));
+        assert!(xml.contains("unitCode=\"HUR\">-1.5<"));
+        assert!(xml.contains("<ram:LineTotalAmount>-135.00</ram:LineTotalAmount>"));
+    }
+
+    #[test]
+    fn seller_tax_number_contact_and_electronic_addresses() {
+        let mut s = seller();
+        s.vat_id = String::new();
+        let b = Buyer {
+            reference: String::new(),
+            country: "AT".into(),
+            vat_id: "ATU12345678".into(),
+            email: "einkauf@acme.example".into(),
+        };
+        let xml = einvoice_xml(&doc(), &s, &b);
+        // ohne USt-IdNr. trägt die Steuernummer (BR-CO-26)
+        assert!(xml.contains("<ram:ID schemeID=\"FC\">12/345/6789</ram:ID>"));
+        // … und als Verkäufer-Kennung BT-29 (BR-CO-26)
+        assert!(xml.contains("<ram:SellerTradeParty><ram:ID>12/345/6789</ram:ID><ram:Name>"));
+        assert!(!xml.contains("schemeID=\"VA\">DE"));
+        // Verkäufer-Kontakt + elektronische Adressen
+        assert!(xml.contains("<ram:CompleteNumber>+49 40 123456</ram:CompleteNumber>"));
+        assert!(xml.contains("<ram:URIID schemeID=\"EM\">buero@lan-solo.de</ram:URIID>"));
+        assert!(xml.contains("<ram:URIID schemeID=\"EM\">einkauf@acme.example</ram:URIID>"));
+        // Käufer-USt-IdNr. und Land
+        assert!(xml.contains("<ram:ID schemeID=\"VA\">ATU12345678</ram:ID>"));
+        assert!(xml.contains("<ram:CountryID>AT</ram:CountryID>"));
+    }
+
+    #[test]
+    fn credit_note_carries_due_date_and_xml_is_clean() {
+        let mut d = doc();
+        d.kind = DocKind::CreditNote;
+        d.customer_name = "Böse\u{0001} <Firma>".into();
+        let xml = einvoice_xml(&d, &seller(), &buyer(""));
+        assert!(xml.contains("<ram:DueDateDateTime>"));
+        assert!(xml.contains("Böse &lt;Firma&gt;"));
+        assert!(!xml.contains('\u{0001}'));
+    }
+
+    #[test]
+    fn xml_element_order_follows_cii_schema() {
+        // Reihenfolge in TradeParty: Name, DefinedTradeContact,
+        // PostalTradeAddress, URIUniversalCommunication, SpecifiedTaxRegistration
+        let xml = einvoice_xml(&doc(), &seller(), &buyer(""));
+        let seller_part = &xml[xml.find("<ram:SellerTradeParty>").unwrap()
+            ..xml.find("</ram:SellerTradeParty>").unwrap()];
+        let pos = |needle: &str| seller_part.find(needle).unwrap_or_else(|| panic!("{needle}"));
+        assert!(pos("<ram:Name>") < pos("<ram:DefinedTradeContact>"));
+        assert!(pos("<ram:DefinedTradeContact>") < pos("<ram:PostalTradeAddress>"));
+        assert!(pos("<ram:PostalTradeAddress>") < pos("<ram:URIUniversalCommunication>"));
+        assert!(pos("<ram:URIUniversalCommunication>") < pos("schemeID=\"FC\""));
+        assert!(pos("schemeID=\"FC\"") < pos("schemeID=\"VA\""));
+    }
+
+    /// Schreibt Beispiel-XMLs für externe Validatoren (Mustang/KoSIT), wenn
+    /// `INVOICES_XML_DUMP=<ordner>` gesetzt ist — sonst ohne Wirkung.
+    #[test]
+    fn dump_samples_for_external_validation() {
+        let Ok(dir) = std::env::var("INVOICES_XML_DUMP") else { return };
+        let dir = std::path::PathBuf::from(dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut b = buyer("04011000-1234-56");
+        b.email = "einkauf@acme.example".into();
+        std::fs::write(dir.join("invoice.xml"), einvoice_xml(&doc(), &seller(), &b)).unwrap();
+        let mut sb = doc();
+        sb.small_business = true;
+        let mut s = seller();
+        s.vat_id = String::new();
+        std::fs::write(dir.join("small-business.xml"), einvoice_xml(&sb, &s, &b)).unwrap();
+        let mut st = doc();
+        st.kind = DocKind::Cancellation;
+        st.number = Some("ST-2026-0001".into());
+        for item in &mut st.items {
+            item.unit_price_cents = -item.unit_price_cents;
+        }
+        std::fs::write(dir.join("cancellation.xml"), einvoice_xml(&st, &seller(), &b)).unwrap();
+        let mut cn = doc();
+        cn.kind = DocKind::CreditNote;
+        cn.number = Some("GS-2026-0001".into());
+        std::fs::write(dir.join("creditnote.xml"), einvoice_xml(&cn, &seller(), &b)).unwrap();
+        let mut mixed = doc();
+        mixed.items.push(crate::LineItem {
+            name: "Porto".into(),
+            quantity: 1.0,
+            unit: "pauschal".into(),
+            unit_price_cents: 250,
+            vat_rate: 0,
+            ..Default::default()
+        });
+        std::fs::write(dir.join("mixed-zero.xml"), einvoice_xml(&mixed, &seller(), &b)).unwrap();
     }
 }

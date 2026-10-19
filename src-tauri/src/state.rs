@@ -9,12 +9,17 @@ pub struct AppState {
     /// Pfad der aktiven Firmen-Datenbank — wechselt beim Firmenwechsel.
     pub db_path: Mutex<PathBuf>,
     pub active_company: Mutex<String>,
+    /// Pfad einer beim Laden zur Seite gelegten, unlesbaren Datenbank —
+    /// die Oberfläche zeigt dazu einen Hinweis.
+    pub quarantined: Mutex<Option<PathBuf>>,
 }
 
 impl AppState {
-    pub fn persist(&self) {
+    /// Datenbank atomar speichern. Fehler gehen an die Oberfläche — ein
+    /// stiller Fehlschlag hieße: der Nutzer glaubt, gespeichert zu haben.
+    pub fn persist(&self) -> Result<(), String> {
         let db = self.db.lock().unwrap();
         let path = self.db_path.lock().unwrap();
-        let _ = invoices_core::save_db(&db, &path);
+        invoices_core::save_db(&db, &path).map_err(|e| format!("save-failed: {e}"))
     }
 }

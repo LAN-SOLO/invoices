@@ -18,17 +18,27 @@ fn main() {
         .plugin(tauri_plugin_process::init())
         .setup(|app| {
             let handle = app.handle().clone();
-            let registry = companies::load_registry(&handle);
-            companies::store_registry(&handle, &registry);
+            let mut registry = companies::load_registry(&handle);
+            // ungültige IDs (manipulierte companies.json) nie als Pfad nutzen
+            registry.list.retain(|c| companies::valid_id(&c.id));
+            if registry.list.is_empty() {
+                registry = companies::Registry::default();
+            }
+            if !registry.list.iter().any(|c| c.id == registry.active) {
+                registry.active = registry.list[0].id.clone();
+            }
+            let _ = companies::store_registry(&handle, &registry);
             let active = registry.active.clone();
             let s = settings::load_for(&handle, &active);
             let db_path = companies::db_path(&handle, &active);
-            let db = invoices_core::load_db(&db_path).unwrap_or_default();
+            let stamp = chrono::Local::now().format("%Y%m%d-%H%M%S").to_string();
+            let (db, quarantined) = invoices_core::load_db_or_quarantine(&db_path, &stamp);
             app.manage(AppState {
                 db: Mutex::new(db),
                 settings: Mutex::new(s),
                 db_path: Mutex::new(db_path),
                 active_company: Mutex::new(active),
+                quarantined: Mutex::new(quarantined),
             });
             // automatisches lokales Backup beim Start (falls aktiviert)
             commands::auto_backup(&app.state::<AppState>());
@@ -59,6 +69,7 @@ fn main() {
             commands::switch_company,
             commands::delete_company,
             commands::data_path,
+            commands::startup_notice,
             commands::write_file,
             commands::get_logo,
             commands::einvoice_xml,

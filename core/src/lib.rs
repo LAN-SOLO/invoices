@@ -10,6 +10,7 @@ use std::collections::HashMap;
 use std::path::Path;
 
 pub mod einvoice;
+pub mod workflow;
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
@@ -162,9 +163,34 @@ pub struct Totals {
     pub gross_cents: i64,
 }
 
+/// Ganzzahlige Division mit kaufmännischer Rundung (halbe Cents weg von
+/// null — symmetrisch für Storno-Beträge).
+fn div_round(numerator: i128, denominator: i128) -> i64 {
+    let half = denominator / 2;
+    let q = if numerator >= 0 {
+        (numerator + half) / denominator
+    } else {
+        (numerator - half) / denominator
+    };
+    q as i64
+}
+
+/// Menge auf 4 Nachkommastellen als Ganzzahl (×10 000). Damit ist die
+/// Rundung unabhängig von Binär-Gleitkomma-Artefakten (2,675 × 1,00 €
+/// ergibt 2,68 € und nicht 2,67 €). Nicht-endliche Mengen zählen als 0.
+fn quantity_units(quantity: f64) -> i128 {
+    if !quantity.is_finite() {
+        return 0;
+    }
+    (quantity * 10_000.0).round() as i128
+}
+
 /// Net line total in cents: quantity × unit price, kaufmännisch gerundet.
 pub fn line_total_cents(item: &LineItem) -> i64 {
-    (item.quantity * item.unit_price_cents as f64).round() as i64
+    div_round(
+        quantity_units(item.quantity) * item.unit_price_cents as i128,
+        10_000,
+    )
 }
 
 /// Totals for a document: net sum, VAT grouped per rate (computed on the
@@ -184,7 +210,7 @@ pub fn totals(items: &[LineItem], small_business: bool) -> Totals {
         rates.sort_unstable();
         for rate in rates {
             let base = bases[&rate];
-            let amount = (base as f64 * rate as f64 / 100.0).round() as i64;
+            let amount = div_round(base as i128 * rate as i128, 100);
             vat.push(VatLine {
                 rate,
                 base_cents: base,
@@ -236,17 +262,83 @@ pub fn next_number(db: &mut Db, prefix: &str, fmt: NumberFormat) -> String {
 
 // --- persistence -------------------------------------------------------
 
+/// Ergebnis beim Laden der Datenbank — "fehlt" und "kaputt" sind zwei
+/// verschiedene Dinge: eine kaputte Datei darf nie still durch eine leere
+/// Datenbank überschrieben werden.
+#[derive(Debug)]
+pub enum LoadError {
+    /// Datei existiert nicht (Erststart) — leere Datenbank ist richtig.
+    Missing,
+    /// Datei existiert, ist aber nicht lesbar oder kein gültiges JSON.
+    Corrupt(String),
+}
+
+pub fn try_load_db(path: &Path) -> Result<Db, LoadError> {
+    let raw = match std::fs::read_to_string(path) {
+        Ok(raw) => raw,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Err(LoadError::Missing),
+        Err(e) => return Err(LoadError::Corrupt(e.to_string())),
+    };
+    serde_json::from_str(&raw).map_err(|e| LoadError::Corrupt(e.to_string()))
+}
+
 pub fn load_db(path: &Path) -> Option<Db> {
-    let raw = std::fs::read_to_string(path).ok()?;
-    serde_json::from_str(&raw).ok()
+    try_load_db(path).ok()
+}
+
+/// Lädt die Datenbank; ist die Datei kaputt, wird sie zur Seite gelegt
+/// (`db.json.corrupt-<stamp>`) statt beim nächsten Speichern überschrieben
+/// zu werden. Gibt die Datenbank und ggf. den Pfad der Quarantäne-Datei
+/// zurück.
+pub fn load_db_or_quarantine(path: &Path, stamp: &str) -> (Db, Option<std::path::PathBuf>) {
+    match try_load_db(path) {
+        Ok(db) => (db, None),
+        Err(LoadError::Missing) => (Db::default(), None),
+        Err(LoadError::Corrupt(_)) => {
+            let name = path
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_else(|| "db.json".into());
+            let target = path.with_file_name(format!("{name}.corrupt-{stamp}"));
+            match std::fs::rename(path, &target) {
+                Ok(()) => (Db::default(), Some(target)),
+                // lässt sich nicht verschieben → Kopie versuchen, Original
+                // bleibt dann zwar liegen, wird aber gleich überschrieben
+                Err(_) => {
+                    let _ = std::fs::copy(path, &target);
+                    (Db::default(), Some(target))
+                }
+            }
+        }
+    }
+}
+
+/// Schreibt eine Datei atomar: erst in eine temporäre Nachbardatei,
+/// Daten auf die Platte zwingen, dann per Rename ersetzen — ein Absturz
+/// hinterlässt nie eine halb geschriebene Datei. (`rename` ersetzt auch
+/// unter Windows eine vorhandene Zieldatei.)
+pub fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    use std::io::Write;
+    let name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| "file".into());
+    let tmp = path.with_file_name(format!("{name}.tmp"));
+    {
+        let mut file = std::fs::File::create(&tmp)?;
+        file.write_all(bytes)?;
+        file.sync_all()?;
+    }
+    if let Err(e) = std::fs::rename(&tmp, path) {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(e);
+    }
+    Ok(())
 }
 
 pub fn save_db(db: &Db, path: &Path) -> std::io::Result<()> {
     let json = serde_json::to_string_pretty(db)?;
-    // write via temp file + rename so a crash never truncates the db
-    let tmp = path.with_extension("json.tmp");
-    std::fs::write(&tmp, json)?;
-    std::fs::rename(&tmp, path)
+    write_atomic(path, json.as_bytes())
 }
 
 // --- search ------------------------------------------------------------
@@ -316,6 +408,60 @@ mod tests {
         assert_eq!(t.net_cents, 66);
         assert_eq!(t.vat[0].vat_cents, 13);
         assert_eq!(t.gross_cents, 79);
+    }
+
+    #[test]
+    fn line_total_is_immune_to_float_artifacts() {
+        // 2,675 × 1,00 € = 2,675 → kaufmännisch 2,68 € (f64 allein ergäbe 2,67)
+        assert_eq!(line_total_cents(&item(2.675, 100, 19)), 268);
+        // 1,005 × 10,00 € = 10,05 €
+        assert_eq!(line_total_cents(&item(1.005, 1000, 19)), 1005);
+        // Storno: negative Preise runden symmetrisch
+        assert_eq!(line_total_cents(&item(2.675, -100, 19)), -268);
+        // Unsinn bleibt harmlos
+        assert_eq!(line_total_cents(&item(f64::NAN, 100, 19)), 0);
+    }
+
+    #[test]
+    fn vat_rounding_is_symmetric_for_cancellations() {
+        // 0,50 € × 7 % = 0,035 → 0,04 €; Storno → −0,04 €
+        let t = totals(&[item(1.0, 50, 7)], false);
+        assert_eq!(t.vat[0].vat_cents, 4);
+        let s = totals(&[item(1.0, -50, 7)], false);
+        assert_eq!(s.vat[0].vat_cents, -4);
+        assert_eq!(s.gross_cents, -t.gross_cents);
+    }
+
+    #[test]
+    fn corrupt_db_is_quarantined_not_overwritten() {
+        let dir = std::env::temp_dir().join(format!("invoices-core-corrupt-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let path = dir.join("db.json");
+        // fehlende Datei = leere Datenbank, keine Quarantäne
+        let _ = std::fs::remove_file(&path);
+        let (db, moved) = load_db_or_quarantine(&path, "t0");
+        assert!(db.docs.is_empty() && moved.is_none());
+        // kaputte Datei wird zur Seite gelegt
+        std::fs::write(&path, "{ kaputt").unwrap();
+        let (db, moved) = load_db_or_quarantine(&path, "t1");
+        assert!(db.docs.is_empty());
+        let moved = moved.expect("quarantine path");
+        assert!(moved.exists());
+        assert_eq!(std::fs::read_to_string(&moved).unwrap(), "{ kaputt");
+        assert!(!path.exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn write_atomic_replaces_existing_file() {
+        let dir = std::env::temp_dir().join(format!("invoices-core-atomic-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let path = dir.join("x.json");
+        write_atomic(&path, b"one").unwrap();
+        write_atomic(&path, b"two").unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "two");
+        assert!(!dir.join("x.json.tmp").exists());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
