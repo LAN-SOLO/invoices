@@ -251,7 +251,7 @@ const de: Content = {
         '• Kompakt — engere Ränder und kleinere Schrift für lange Positionslisten',
         '• Terminal — Mono-Schrift, gestrichelte Linien, >-Titel',
         'Das Standard-Layout stellst du unter Einstellungen → Design/Layout ein; die Vorschau exportiert im gerade gewählten Layout.',
-        'Der Dateiname folgt der Belegnummer (RE-2026-0001.pdf), den Speicherort wählst du im Dialog.',
+        'Der Dateiname folgt der Belegnummer (RE-2026-0001.pdf), den Speicherort wählst du im Dialog. Zeichen, die im Dateinamen nicht erlaubt sind (etwa „/“ als Trennzeichen), werden zu „-“ — aus RE/2026/0001 wird RE-2026-0001.pdf.',
       ],
     },
     {
@@ -532,7 +532,7 @@ const en: Content = {
         '• Compact — tighter margins and smaller type for long position lists',
         '• Terminal — mono type, dashed rules, >-style title',
         'Set the default layout under Settings → Design/Layout; the preview exports in whatever layout is selected.',
-        'The file name follows the document number (RE-2026-0001.pdf); you pick the location in the dialog.',
+        'The file name follows the document number (RE-2026-0001.pdf); you pick the location in the dialog. Characters that are not allowed in file names (such as “/” as separator) become “-” — RE/2026/0001 is saved as RE-2026-0001.pdf.',
       ],
     },
     {

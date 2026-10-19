@@ -40,8 +40,11 @@ fn main() {
                 active_company: Mutex::new(active),
                 quarantined: Mutex::new(quarantined),
             });
-            // automatisches lokales Backup beim Start (falls aktiviert)
-            commands::auto_backup(&app.state::<AppState>());
+            // automatisches lokales Backup beim Start (falls aktiviert) —
+            // im Hintergrund: ein nicht erreichbarer Netz-/UNC-Ordner darf
+            // den Fensterstart nicht blockieren
+            let bg = app.handle().clone();
+            std::thread::spawn(move || commands::auto_backup(&bg.state::<AppState>()));
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

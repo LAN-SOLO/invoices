@@ -46,10 +46,21 @@ fn registry_path(app: &tauri::AppHandle) -> PathBuf {
 }
 
 pub fn load_registry(app: &tauri::AppHandle) -> Registry {
-    std::fs::read_to_string(registry_path(app))
-        .ok()
-        .and_then(|s| serde_json::from_str(&s).ok())
-        .unwrap_or_default()
+    let path = registry_path(app);
+    let Ok(raw) = std::fs::read_to_string(&path) else {
+        return Registry::default();
+    };
+    match serde_json::from_str(&raw) {
+        Ok(r) => r,
+        Err(_) => {
+            // unlesbare Registry nicht still durch die Standard-Registry
+            // ersetzen (weitere Firmen wären dann unsichtbar) — Kopie zur
+            // Seite legen; die Firmen-Dateien selbst bleiben unangetastet
+            let stamp = chrono::Local::now().format("%Y%m%d-%H%M%S");
+            let _ = std::fs::copy(&path, path.with_file_name(format!("companies.json.corrupt-{stamp}")));
+            Registry::default()
+        }
+    }
 }
 
 pub fn store_registry(app: &tauri::AppHandle, registry: &Registry) -> Result<(), String> {

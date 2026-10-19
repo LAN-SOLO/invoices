@@ -312,6 +312,18 @@ export function errText(e: unknown, errors: Record<string, string>): string {
   return errors[code] ?? raw;
 }
 
+/// Dateiname für den Speichern-Dialog: Pfadtrenner und unter Windows
+/// verbotene Zeichen ersetzen. Sonst würde z. B. die Belegnummer
+/// "RE/2026/0001" (Trennzeichen „/“) als Ordner "RE/2026" + Datei
+/// "0001.pdf" gelesen.
+export function safeFileName(name: string): string {
+  const cleaned = name
+    .replace(/[\\/:*?"<>|\u0000-\u001f]/g, '-')
+    .replace(/[. ]+$/, '')
+    .trim();
+  return cleaned || 'beleg';
+}
+
 export function centsToInput(cents: number, lang: 'de' | 'en'): string {
   const s = (cents / 100).toFixed(2);
   return lang === 'de' ? s.replace('.', ',') : s;

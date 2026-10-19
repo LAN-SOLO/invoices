@@ -88,7 +88,7 @@ Legende Teststatus:
 - **XRechnung im engeren Sinn (KoSIT-CIUS):** Das XML nutzt die Kennung `urn:cen.eu:en16931:2017` (Factur-X/ZUGFeRD EN 16931). Behördenportale, die die XRechnung-CIUS-Kennung und deren Zusatzregeln (BR-DE-*) verlangen, können es ablehnen.
 - **Kein eigenes Leistungsdatum:** Das Belegdatum gilt als Rechnungsdatum; den Leistungszeitraum bitte in die Positionsbeschreibung schreiben (§14 UStG).
 - **Kopfzeile ApplicableHeaderTradeDelivery bleibt leer** (Warnung PEPPOL-EN16931-R008, kein Fehler).
-- **Sprache beim Erststart unter Windows:** Die Voreinstellung liest `LANG`; Windows setzt das nicht → Englisch, bis in Einstellungen → App umgestellt wird.
+- **Sprache beim Erststart:** Das Backend liest `LANG` (unter Windows und bei Finder/Dock-Start unter macOS nicht gesetzt); seit der Verifikation übernimmt das Frontend beim Erststart `navigator.language` der Webview. Auf beiden Systemen manuell prüfen (Testliste Punkt 1).
 - **Kundenlöschen:** E-Mail/USt-IdNr./Leitweg-ID der E-Rechnung kommen live aus der Kundenkartei; nach dem Löschen eines Kunden fehlen sie in später exportierten E-Rechnungen (Name/Anschrift bleiben als Snapshot).
 - **jsPDF-Standardschriften (WinAnsi):** Zeichen außerhalb Westeuropas (z. B. ł, ő, kyrillisch) werden im PDF falsch dargestellt.
 - **Windows-Kompilat** konnte lokal nicht geprüft werden (`ring` lässt sich ohne MSVC nicht cross-kompilieren); `invoices-core` kompiliert für `x86_64-pc-windows-msvc`. Der CI-Build ist der Nachweis.
@@ -123,7 +123,33 @@ Jeweils mit frischem Profil **und** mit einem Datenstand aus 0.4.0 (Update-Pfad)
 
 ```sh
 pnpm build                      # tsc + vite build — fehlerfrei
-cargo test --workspace          # 29 Core-Tests + 4 Backend-Tests (+1 nur unter Windows)
+cargo test --workspace          # 29 Core-Tests + 5 Backend-Tests (+1 nur unter Windows)
 INVOICES_XML_DUMP=<ordner> cargo test -p invoices-core dump   # Beispiel-XMLs für Validatoren
 java -jar Mustang-CLI-2.26.0.jar --action validate --source <ordner>/invoice.xml
 ```
+
+## 7. Verifikation (unabhängige Zweitprüfung, 2026-10-19)
+
+Geprüft wurde der komplette Diff `f818cc3..4c3a584` plus eigene Stichproben. Selbst ausgeführt:
+
+- `cargo test --workspace`: vor den Nachbesserungen 4 + 29 grün; danach **5 + 29 grün** (neuer Test `failed_first_save_rolls_back_to_empty_db`).
+- `pnpm build` (tsc + vite): fehlerfrei. Lint: Repo hat keine ESLint-Konfiguration.
+- `pnpm audit`: 29 Befunde, ausschließlich `jspdf` (2.5.2) und `dompurify` (transitiv). Erreichbarkeit nachgeprüft: die App nutzt nur `text`, `addImage` (Logo, im Backend auf PNG/JPEG-Magic-Bytes beschränkt — GIF/BMP-DoS nicht erreichbar), `getImageProperties`, `autoTable`, `output('arraybuffer')` — kein `html`, `addJS`, AcroForm, FreeText, `output('…newwindow')`. Einschätzung „Upgrade für 1.1“ bestätigt.
+- IPC-Abgleich: alle 30 `invoke`-Namen und Argumentnamen in `src/api.ts` passen zu den Rust-Signaturen (camelCase → snake_case, `new`, `dataBase64`, `newId`); alle 20 Backend-Fehlercodes sind in DE und EN übersetzt; `en` ist als `typeof de` typisiert (fehlende Schlüssel wären Typfehler).
+- Version 1.0.0 in `package.json`, `tauri.conf.json`, `src-tauri/Cargo.toml`, `Cargo.lock`; Anzeige über `getVersion()`. `build.yml`: nichts versionsabhängig, Signatur/Notarisierung unverändert; MSI akzeptiert 1.0.0.
+
+Widerlegt bzw. ergänzt:
+
+- „Nach Wiederherstellung lädt die App neu“ — es wird kein Fenster-Reload ausgelöst, sondern Einstellungen und Listen frisch vom Backend geholt; wirkt gleich (Abbrechen holt den alten Stand nicht zurück).
+- Die Sprach-Voreinstellung war nicht nur unter Windows falsch: auch per Finder/Dock gestartete macOS-Apps erben kein `LANG`.
+
+Zusätzlich behoben:
+
+1. **Dateiname bei Trennzeichen „/“:** Mit dem angebotenen Nummernkreis-Trennzeichen „/“ wurde `RE/2026/0001.pdf` vom Speichern-Dialog als Ordner `RE/2026` + Datei `0001.pdf` gelesen (tauri-plugin-dialog `set_default_path`). Jetzt `safeFileName()` für PDF-, XML-, ZUGFeRD- und Vorschau-Export (ersetzt `\ / : * ? " < > |` und Steuerzeichen durch „-“, auch für Windows-verbotene Zeichen in Präfixen). Hilfe DE/EN ergänzt.
+2. **Rollback bei fehlgeschlagenem Erst-Speichern:** `commit()` setzte den Speicher nur zurück, wenn `db.json` lesbar war. Existierte sie noch nicht (frische Installation, Datenordner nicht beschreibbar), blieb z. B. eine vergebene Nummer im Speicher. Jetzt „fehlt“ → leere Datenbank, „kaputt“ → nichts überschreiben. Neuer Rust-Test.
+3. **Kaputte `companies.json`:** wurde still durch die Standard-Registry ersetzt (weitere Firmen unsichtbar). Jetzt Kopie `companies.json.corrupt-<stamp>` vor dem Ersetzen; Firmendateien bleiben ohnehin liegen.
+4. **Auto-Backup blockierte den Start:** lief synchron im `setup` — ein nicht erreichbarer Netz-/UNC-Backup-Ordner (Windows: SMB-Timeout) hätte das Fenster verzögert. Läuft jetzt in einem Hintergrund-Thread.
+5. **Quarantäne-Hinweis beim Firmenwechsel:** Eine beim Wechsel zur Seite gelegte, unlesbare Firmen-Datenbank wurde nicht gemeldet (Hinweis nur beim App-Start). Jetzt auch nach Wechsel/Wiederherstellung.
+6. **Erststart-Sprache:** siehe oben — `navigator.language` wird beim allerersten Start übernommen (nur wenn noch kein Firmenname gesetzt und das Tutorial nie gesehen wurde).
+
+Nur statisch geprüft (braucht einen Menschen bzw. echtes System): Punkte 4–6 oben im laufenden Tauri-Fenster, native Dialoge mit Umlaut-/Leerzeichen-/Laufwerkspfaden, Windows-Kompilat (nur CI), Mustang/veraPDF-Ergebnisse der Erstprüfung wurden nicht wiederholt (Werkzeuge nicht mehr vorhanden).

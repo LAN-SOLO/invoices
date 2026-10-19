@@ -16,6 +16,7 @@ import {
   fmtDate,
   fmtMoney,
   isOverdue,
+  safeFileName,
   todayIso,
   totals,
 } from './api';
@@ -104,7 +105,22 @@ export default function App() {
   }, [query]);
 
   useEffect(() => {
-    api.getSettings().then((s) => {
+    api.getSettings().then((loaded) => {
+      let s = loaded;
+      // Erststart: Das Backend kennt die Systemsprache nur über LANG — das
+      // setzen weder Windows noch per Finder/Dock gestartete macOS-Apps.
+      // Die Webview kennt sie (navigator.language), also hier übernehmen.
+      let firstRun = false;
+      try {
+        firstRun = !localStorage.getItem('invoices.tutorialSeen');
+      } catch {
+        firstRun = false;
+      }
+      const sysLang: Lang = (navigator.language || '').toLowerCase().startsWith('de') ? 'de' : 'en';
+      if (firstRun && !s.companyName.trim() && s.language !== sysLang) {
+        s = { ...s, language: sysLang };
+        api.setSettings(s).catch(() => {});
+      }
       setSettings(s);
       // unlesbare Datenbank wurde beim Start zur Seite gelegt → deutlich melden
       api
@@ -244,7 +260,7 @@ export default function App() {
         : null;
       const { bytes, suggestedName } = buildPdf(doc, settings, t, lang, logo, related);
       const path = await save({
-        defaultPath: suggestedName,
+        defaultPath: safeFileName(suggestedName),
         filters: [{ name: 'PDF', extensions: ['pdf'] }],
       });
       if (!path) return;
@@ -259,7 +275,7 @@ export default function App() {
     try {
       const { xml, suggestedName } = await api.einvoiceXml(doc.id);
       const path = await save({
-        defaultPath: suggestedName,
+        defaultPath: safeFileName(suggestedName),
         filters: [{ name: 'XML', extensions: ['xml'] }],
       });
       if (!path) return;
@@ -283,7 +299,7 @@ export default function App() {
       const { bytes } = buildPdf(doc, settings, t, lang, logo, related);
       const hybrid = await embedZugferd(bytes, xml, doc.number ?? 'invoice');
       const path = await save({
-        defaultPath: `${doc.number ?? 'beleg'}-zugferd.pdf`,
+        defaultPath: safeFileName(`${doc.number ?? 'beleg'}-zugferd.pdf`),
         filters: [{ name: 'PDF', extensions: ['pdf'] }],
       });
       if (!path) return;
@@ -872,7 +888,16 @@ export default function App() {
           onError={showError}
           onReloaded={(msg) => {
             // Firmenwechsel / Wiederherstellung: alles frisch vom Backend
-            api.getSettings().then(setSettings);
+            api.getSettings().then((fresh) => {
+              setSettings(fresh);
+              // beim Wechsel zur Seite gelegte, unlesbare Datenbank melden
+              api
+                .startupNotice()
+                .then((path) => {
+                  if (path) window.alert(dicts[fresh.language ?? 'de'].dbQuarantined(path));
+                })
+                .catch(() => {});
+            });
             refresh();
             setEditorDoc(null);
             setShowSettings(false);

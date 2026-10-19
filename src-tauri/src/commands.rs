@@ -53,8 +53,14 @@ fn prefix_for(settings: &Settings, kind: DocKind) -> String {
 fn commit(st: &AppState) -> Result<(), String> {
     if let Err(e) = st.persist() {
         let path = st.db_path.lock().unwrap().clone();
-        if let Some(db) = invoices_core::load_db(&path) {
-            *st.db.lock().unwrap() = db;
+        match invoices_core::try_load_db(&path) {
+            Ok(db) => *st.db.lock().unwrap() = db,
+            // noch nie gespeichert (Erststart) → Platten-Stand ist „leer“
+            Err(invoices_core::LoadError::Missing) => {
+                *st.db.lock().unwrap() = invoices_core::Db::default()
+            }
+            // unlesbar: Speicher-Stand behalten, nichts überschreiben
+            Err(invoices_core::LoadError::Corrupt(_)) => {}
         }
         return Err(e);
     }
@@ -710,6 +716,26 @@ mod tests {
         assert!(!valid_id("C:"));
         assert!(!valid_id("a/b"));
         assert!(!valid_id(&"a".repeat(65)));
+    }
+
+    #[test]
+    fn failed_first_save_rolls_back_to_empty_db() {
+        // Ordner existiert nicht → Speichern scheitert; da noch nie etwas
+        // auf der Platte lag, muss der Speicher wieder leer sein (keine
+        // vergebene, ungespeicherte Nummer).
+        let missing_dir = std::env::temp_dir()
+            .join(format!("invoices-no-such-dir-{}", std::process::id()));
+        let mut db = invoices_core::Db::default();
+        db.customers.push(Customer { id: "c1".into(), name: "ACME".into(), ..Default::default() });
+        let st = AppState {
+            db: std::sync::Mutex::new(db),
+            settings: std::sync::Mutex::new(Settings::default()),
+            db_path: std::sync::Mutex::new(missing_dir.join("db.json")),
+            active_company: std::sync::Mutex::new("default".into()),
+            quarantined: std::sync::Mutex::new(None),
+        };
+        assert!(commit(&st).unwrap_err().starts_with("save-failed"));
+        assert!(st.db.lock().unwrap().customers.is_empty());
     }
 
     #[test]

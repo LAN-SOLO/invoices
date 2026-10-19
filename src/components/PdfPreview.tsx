@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { save } from '@tauri-apps/plugin-dialog';
-import { api, Doc, Settings } from '../api';
+import { api, Doc, Settings, safeFileName } from '../api';
 import { Dict, Lang } from '../i18n';
 import { buildPdf, bytesToBase64, PdfLayout } from '../pdf';
 
@@ -62,7 +62,7 @@ export function PdfPreview({ doc, settings, relatedNumber, t, lang, onClose, sho
     try {
       const { bytes, suggestedName } = buildPdf(doc, settings, t, lang, logo, relatedNumber, layout);
       const path = await save({
-        defaultPath: suggestedName,
+        defaultPath: safeFileName(suggestedName),
         filters: [{ name: 'PDF', extensions: ['pdf'] }],
       });
       if (!path) return;
