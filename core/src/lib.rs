@@ -329,11 +329,20 @@ pub fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
         file.write_all(bytes)?;
         file.sync_all()?;
     }
-    if let Err(e) = std::fs::rename(&tmp, path) {
-        let _ = std::fs::remove_file(&tmp);
-        return Err(e);
+    // Windows: Virenscanner/Indexer halten frisch geschriebene Dateien
+    // gelegentlich kurz offen — Rename dann ein paar Mal wiederholen.
+    let mut last_err = None;
+    for attempt in 0..5 {
+        match std::fs::rename(&tmp, path) {
+            Ok(()) => return Ok(()),
+            Err(e) => {
+                last_err = Some(e);
+                std::thread::sleep(std::time::Duration::from_millis(40 * (attempt + 1)));
+            }
+        }
     }
-    Ok(())
+    let _ = std::fs::remove_file(&tmp);
+    Err(last_err.expect("at least one attempt"))
 }
 
 pub fn save_db(db: &Db, path: &Path) -> std::io::Result<()> {
