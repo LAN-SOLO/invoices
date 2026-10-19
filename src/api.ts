@@ -320,7 +320,8 @@ export function errText(e: unknown, errors: Record<string, string>): string {
   const known = errors[code];
   if (!known) return raw;
   const detail = idx >= 0 ? raw.slice(idx + 1).trim() : '';
-  return detail ? `${known} (${detail})` : known;
+  // Detail kann selbst ein Code sein („auto-backup-failed: bad-path“)
+  return detail ? `${known} (${errors[detail] ?? detail})` : known;
 }
 
 /// Dateiname für den Speichern-Dialog: Pfadtrenner und unter Windows

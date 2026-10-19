@@ -187,3 +187,32 @@ Offen / nicht in Code lösbar:
   23. Leistungsdatum setzen, festschreiben, ZUGFeRD exportieren → im Viewer/Validator BT-72 vorhanden; ohne Leistungsdatum = Belegdatum.
   24. Windows: Export als `CON.pdf` → Meldung „reserviert“.
 
+## 9. Runde 2 – Verifikation (unabhängige Zweitprüfung, 2026-10-20)
+
+Geprüft: Diff `753bb3e..eef87ec` auf Regressionen (plattformübergreifend, neue async-Befehle/Races) und L1–L13 an Stellen, die Runde 2 nicht genannt hatte.
+
+Bestätigt (selbst ausgeführt bzw. im Quelltext nachgelesen):
+
+- L1: keine `window.confirm/alert/prompt` mehr im Frontend (grep). `confirm()` aus `@tauri-apps/plugin-dialog` 2.7.2 sendet `plugin:dialog|message` mit `{OkCancelCustom:[ok, cancel]}` und vergleicht das Ergebnis mit dem OK-Text; Rust (`tauri-plugin-dialog` 2.7.2, `rfd` 0.16 mit `common-controls-v6`) liefert unter macOS/Windows den Text des geklickten Knopfs, Esc/Schließen ergibt „Cancel“ bzw. den Abbrechen-Text — beides ≠ OK-Text. OK- und Abbrechen-Texte sind in DE und EN bei allen Rückfragen verschieden. `dialog:default` enthält `allow-message`.
+- Zusätzlich im Headless-Chromium (Mock wie Runde 2, `window.confirm` als Falle) die von Runde 2 nicht geprüften Rückfragen: Artikel löschen, Vorlage löschen, Firma entfernen (je Abbrechen + OK) und Backup wiederherstellen mit Abbrechen (kein `import_backup`) — 13/13 je Kombination DE/EN × Hell/Dunkel grün; die 51 Prüfungen aus Runde 2 laufen unverändert 51/51.
+- Alle Fehlercodes des Backends haben DE- und EN-Texte (Abgleich per Skript). Lock-Reihenfolge der Wiederherstellung (DB-Pfad freigegeben, dann DB-Lock, dann Einstellungen) kann mit `persist()` nicht verklemmen.
+- `cargo test --workspace` (12 Backend + 35 Core), `pnpm build`, Windows-Typecheck `cargo check --target x86_64-pc-windows-msvc --workspace --tests` (nach erzwungener Neuprüfung beider Crates) fehlerfrei. `cargo audit`: nur noch die bekannten `zip`-Advisories (über tauri-plugin-updater) und Unmaintained-Warnungen; `pnpm audit`: unverändert 29 (jsPDF/DOMPurify, siehe Abschnitt 8).
+
+Behoben:
+
+1. **L4 — BOM auch in den eigenen Datendateien:** `db.json`, Einstellungen und `companies.json` wurden mit `serde_json::from_str` gelesen — mit dem Windows-Editor gespeichert (UTF-8 mit BOM) galt die **Datenbank als kaputt, wurde in Quarantäne gelegt und die App startete leer**; Einstellungen fielen auf Standard zurück. Jetzt `invoices_core::strip_bom` in allen drei Ladern (Test `db_with_utf8_bom_loads_instead_of_quarantine`).
+2. **L2 — Detail-Code unübersetzt:** „Auto-Backup fehlgeschlagen (bad-path)“ zeigte den rohen Code als Detail (relativer Backup-Ordner). `errText()` übersetzt jetzt auch ein Detail, das selbst ein bekannter Code ist (im UI-Test DE/EN geprüft).
+3. **L11 — falsche Rückfrage:** Scheiterte das Festschreiben nach dem automatischen Speichern (z. B. `doc-bad-date`), fragte „Zurück zur Liste“ nach „ungespeicherten Änderungen“, obwohl alles gespeichert war — Vergleichsbasis war der Stand beim Öffnen. Jetzt ist die Basis der zuletzt gespeicherte Stand (App setzt ihn nach dem Speichern). UI-Test: unberührter neuer/wieder geöffneter Entwurf und gespeichert-aber-nicht-festgeschrieben → keine Rückfrage; geänderter Entwurf → Rückfrage. Vor dem Fix schlugen diese Prüfungen nachweislich fehl.
+
+Bewusst belassen (gering, dokumentiert):
+
+- Scheitert beim Wiederherstellen nach der Datenbank das Schreiben der Einstellungen, ist die DB schon ersetzt (Sicherheitskopie `db.json.before-restore-*` liegt daneben, Fehler wird angezeigt).
+- `import_backup` läuft jetzt im Thread-Pool, `switch_company` auf dem Hauptthread; ein Firmenwechsel *während* einer laufenden Wiederherstellung könnte Einstellungen und DB verschiedenen Firmen zuordnen. Über die Oberfläche praktisch nicht auslösbar (beide im selben Einstellungsdialog, Wiederherstellen schließt ihn).
+- Auto-Backup-Fehler kann im ungünstigen Timing doppelt erscheinen (nativer Hinweis + Toast) — nie gar nicht.
+- Ein Backup-Ordner `\backups` (laufwerksrelativ ohne Buchstaben) gilt unter Windows jetzt als relativ und wird gemeldet statt still auf dem aktuellen Laufwerk angelegt.
+
+Nur auf echter Hardware prüfbar (zusätzlich zu Abschnitt 5 Punkte 1–20 und Abschnitt 8 Punkte 21–24):
+
+25. Windows: `db.json` im Editor öffnen, speichern (UTF-8 mit BOM), App starten → Daten da, kein Quarantäne-Hinweis.
+26. Windows: native Rückfragen zeigen die eigenen Knopftexte („Stornieren“/„Abbrechen“) und Esc bricht ab (rfd nutzt mit `common-controls-v6` den TaskDialog; das Standard-Manifest von tauri-build 2.6.3 bindet Common Controls 6.0 ein — im Quelltext geprüft, nicht ausgeführt).
+

@@ -63,11 +63,10 @@ export function DocEditor({
     doc.items.map((i) => centsToInput(i.unitPriceCents, lang))
   );
 
-  // Ausgangsstand für „ungespeicherte Änderungen?“ beim Verlassen
-  const [initial] = useState(() => JSON.stringify(doc));
-
+  // „Ungespeicherte Änderungen?“ beim Verlassen: Vergleich mit dem zuletzt
+  // gespeicherten Stand (Prop `doc` — App setzt ihn nach jedem Speichern neu)
   const leave = async () => {
-    if (!readOnly && JSON.stringify(committed()) !== initial) {
+    if (!readOnly && JSON.stringify(committed()) !== JSON.stringify(doc)) {
       const ok = await confirmDialog(t.confirmDiscard, { ok: t.discard, cancel: t.dlgBack });
       if (!ok) return;
     }

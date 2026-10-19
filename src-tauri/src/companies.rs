@@ -50,7 +50,7 @@ pub fn load_registry(app: &tauri::AppHandle) -> Registry {
     let Ok(raw) = std::fs::read_to_string(&path) else {
         return Registry::default();
     };
-    match serde_json::from_str(&raw) {
+    match serde_json::from_str(invoices_core::strip_bom(&raw)) {
         Ok(r) => r,
         Err(_) => {
             // unlesbare Registry nicht still durch die Standard-Registry

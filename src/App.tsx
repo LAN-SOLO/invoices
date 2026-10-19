@@ -276,6 +276,10 @@ export default function App() {
       return;
     }
     if (!(await saveDraft(doc, true))) return;
+    // gespeicherter Stand ist die neue Vergleichsbasis des Editors — scheitert
+    // das Festschreiben (z. B. ungültiges Datum), fragt „Zurück“ nicht nach
+    // „ungespeicherten“ Änderungen, die längst gespeichert sind
+    setEditorDoc(doc);
     try {
       const finalized = await api.finalizeDoc(doc.id);
       setEditorDoc(finalized);

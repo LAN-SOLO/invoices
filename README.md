@@ -21,7 +21,9 @@ pnpm build              # Typecheck + Frontend-Build
 cargo test --workspace  # Core (Geld, Nummernkreise, Workflow, E-Rechnung) + Backend-Helfer (Pfade, Backup, Wiederherstellung)
 ```
 
-Audit- und Teststand zur 1.0: `AUDIT-1.0.md` (inkl. Runde 2).
+Audit- und Teststand zur 1.0: `AUDIT-1.0.md` (inkl. Runde 2 und deren Verifikation).
+
+JSON-Dateien (Datenbank, Einstellungen, Firmenliste, Backups) werden mit und ohne UTF-8-BOM gelesen (`invoices_core::strip_bom`) — der Windows-Editor speichert mit BOM.
 
 Rückfragen und Hinweise laufen ausschließlich über `src/dialogs.ts` (tauri-plugin-dialog, `await`) — nie `window.confirm/alert/prompt`, die das Plugin durch asynchrone Stubs ersetzt.
 

@@ -282,7 +282,14 @@ pub fn try_load_db(path: &Path) -> Result<Db, LoadError> {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Err(LoadError::Missing),
         Err(e) => return Err(LoadError::Corrupt(e.to_string())),
     };
-    serde_json::from_str(&raw).map_err(|e| LoadError::Corrupt(e.to_string()))
+    serde_json::from_str(strip_bom(&raw)).map_err(|e| LoadError::Corrupt(e.to_string()))
+}
+
+/// UTF-8-BOM am Dateianfang entfernen: der Windows-Editor speichert JSON
+/// gern mit BOM — serde_json lehnt das ab, die Datei wäre sonst „kaputt“
+/// (Datenbank in Quarantäne, Einstellungen auf Standard).
+pub fn strip_bom(raw: &str) -> &str {
+    raw.strip_prefix('\u{feff}').unwrap_or(raw)
 }
 
 pub fn load_db(path: &Path) -> Option<Db> {
@@ -483,6 +490,24 @@ mod tests {
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "two");
         let names: Vec<_> = std::fs::read_dir(&dir).unwrap().map(|e| e.unwrap().file_name()).collect();
         assert_eq!(names, vec![std::ffi::OsString::from("x.json")], "keine Temp-Reste");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn db_with_utf8_bom_loads_instead_of_quarantine() {
+        let dir = std::env::temp_dir().join(format!("invoices-core-bom-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("db.json");
+        let mut db = Db::default();
+        db.customers.push(Customer { id: "c1".into(), name: "Müller".into(), ..Default::default() });
+        let mut raw = vec![0xEF, 0xBB, 0xBF];
+        raw.extend_from_slice(serde_json::to_string(&db).unwrap().as_bytes());
+        std::fs::write(&path, raw).unwrap();
+        let (loaded, quarantined) = load_db_or_quarantine(&path, "x");
+        assert!(quarantined.is_none());
+        assert_eq!(loaded.customers.len(), 1);
+        assert_eq!(strip_bom("abc"), "abc");
         let _ = std::fs::remove_dir_all(&dir);
     }
 

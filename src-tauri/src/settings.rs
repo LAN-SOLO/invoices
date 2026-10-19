@@ -128,7 +128,7 @@ pub fn load_for(app: &tauri::AppHandle, company_id: &str) -> Settings {
     let Ok(raw) = std::fs::read_to_string(&path) else {
         return Settings::default();
     };
-    match serde_json::from_str(&raw) {
+    match serde_json::from_str(invoices_core::strip_bom(&raw)) {
         Ok(s) => s,
         Err(_) => {
             // unlesbare Einstellungen nicht still überschreiben — Kopie
