@@ -1,12 +1,14 @@
 # invoices.
 
-Rechnungstool für kleine Unternehmen — schreiben, senden, abhaken.
+Rechnungstool für kleine Unternehmen — schreiben, senden, abhaken. Version 1.0.
 
-- **Belege:** Rechnungen, Gutschriften und Storno — Entwürfe frei, festgeschrieben unveränderlich, korrigiert wird per Storno.
-- **Stammdaten:** Kunden und Artikel einmal anlegen, überall einfügen.
-- **Steuern, richtig:** USt 19/7/0 %, Kleinunternehmerregelung nach §19 UStG, fortlaufende Nummernkreise pro Jahr.
-- **PDF:** A4-Beleg mit Briefkopf, Logo, USt-Aufstellung und Bankverbindung in der Fußzeile.
-- **Offene Posten:** offen, überfällig, bezahlt — inklusive Summe der Außenstände.
+- **Belege:** Rechnungen, Gutschriften, Storno, Angebote, Auftragsbestätigungen und Lieferscheine — Entwürfe frei, festgeschrieben unveränderlich, korrigiert wird per Storno. Angebot/AB per Klick zur Rechnung, Vorlagen für Wiederkehrendes.
+- **Stammdaten:** Kunden (strukturierte Anschrift, Leitweg-ID) und Artikel einmal anlegen, überall einfügen.
+- **Steuern, richtig:** USt 19/7/0 % in ganzzahliger Cent-Rechnung, Kleinunternehmerregelung nach §19 UStG, fortlaufende Nummernkreise (mit/ohne Jahr, Stellen, Trennzeichen).
+- **PDF:** A4-Beleg mit Briefkopf, Logo, USt-Aufstellung und Bankverbindung — vier Layouts, 20 Farbschemata, Live-Vorschau.
+- **E-Rechnung:** XRechnung-/Factur-X-XML (CII, EN 16931) und ZUGFeRD-Hybrid-PDF.
+- **Überblick:** Dashboard mit offenen Posten, Überfälligem, Monatsumsatz und Top-Kunden.
+- **Mehrere Unternehmen**, Backups (manuell + automatisch beim Start), Hell/Dunkel.
 
 DE/EN, signierte In-App-Updates. Alles lokal — kein Konto, keine Cloud, keine Telemetrie.
 
@@ -15,8 +17,11 @@ DE/EN, signierte In-App-Updates. Alles lokal — kein Konto, keine Cloud, keine 
 ```sh
 pnpm install
 pnpm tauri dev
-cargo test -p invoices-core
+pnpm build              # Typecheck + Frontend-Build
+cargo test --workspace  # Core (Geld, Nummernkreise, Workflow, E-Rechnung) + Backend-Helfer
 ```
+
+Audit- und Teststand zur 1.0: `AUDIT-1.0.md`.
 
 ## Release-Build (lokal)
 

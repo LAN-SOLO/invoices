@@ -28,7 +28,7 @@ Website: https://lan-solo.com/de/tools/invoices/
 - [x] Phase 1 — v0.1.1: Kunden, Artikel, Rechnungen/Gutschriften/Storno,
       Festschreiben mit Nummernkreisen, §19, PDF-Export, offene Posten,
       Hilfe (Tutorial + Handbuch), DE/EN, In-App-Updates
-- [ ] Phase 2 — Angebote, Auftragsbestätigungen, Lieferscheine (Belegkette per Klick)
+- [x] Phase 2 — v0.3.0: Angebote, Auftragsbestätigungen, Lieferscheine (Belegkette per Klick)
 - [x] Phase 3 — v0.2.0: E-Rechnung nach EN 16931 — XRechnung-XML (CII) aus
       `core/einvoice.rs` (getestet) + ZUGFeRD-PDF via pdf-lib (factur-x.xml,
       XMP-PDF/A-3-Deklaration, sRGB-OutputIntent); dazu Nummernkreis-Layout
