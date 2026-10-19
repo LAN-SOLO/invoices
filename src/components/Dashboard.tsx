@@ -33,7 +33,8 @@ export function Dashboard({ docs, customers, t, lang, onOpenDoc }: Props) {
   const stats = useMemo(() => {
     const now = new Date();
     const thisYear = String(now.getFullYear());
-    const thisMonth = monthKey(now.toISOString());
+    // lokales Datum, nicht UTC — sonst kippt der Monat um Mitternacht
+    const thisMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
 
     const openInvoices = docs.filter((d) => d.kind === 'invoice' && d.status === 'open');
     const overdue = openInvoices.filter(isOverdue);

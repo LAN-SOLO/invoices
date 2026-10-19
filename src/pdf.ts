@@ -270,12 +270,12 @@ export function buildPdf(
     alternateRowStyles: spec.zebra ? { fillColor: spec.zebra } : undefined,
     columnStyles: isDelivery
       ? {
-          0: { cellWidth: 10 },
+          0: { cellWidth: 12 },
           2: { cellWidth: 20, halign: 'right' },
           3: { cellWidth: 24 },
         }
       : {
-          0: { cellWidth: 10 },
+          0: { cellWidth: 12 },
           2: { cellWidth: 14, halign: 'right' },
           3: { cellWidth: 16 },
           4: { cellWidth: 24, halign: 'right' },

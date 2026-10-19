@@ -154,6 +154,7 @@ export const api = {
   getSettings: () => invoke<Settings>('get_settings'),
   setSettings: (s: Settings) => invoke<void>('set_settings', { new: s }),
   dataPath: () => invoke<string>('data_path'),
+  startupNotice: () => invoke<string | null>('startup_notice'),
   writeFile: (path: string, dataBase64: string) =>
     invoke<void>('write_file', { path, dataBase64 }),
   getLogo: () => invoke<string | null>('get_logo'),
@@ -173,8 +174,22 @@ export const api = {
 
 // --- shared helpers ----------------------------------------------------
 
+/// Ganzzahlige Division mit kaufmännischer Rundung, halbe Cents weg von
+/// null — spiegelt core::div_round (symmetrisch für Storno-Beträge).
+function divRound(numerator: number, denominator: number): number {
+  const q = Math.floor((Math.abs(numerator) + denominator / 2) / denominator);
+  return numerator < 0 ? -q : q;
+}
+
+/// Menge auf 4 Nachkommastellen als Ganzzahl — spiegelt core::quantity_units.
+function quantityUnits(quantity: number): number {
+  if (!Number.isFinite(quantity)) return 0;
+  const scaled = Math.abs(quantity) * 10000;
+  return quantity < 0 ? -Math.round(scaled) : Math.round(scaled);
+}
+
 export function lineTotalCents(item: LineItem): number {
-  return Math.round(item.quantity * item.unitPriceCents);
+  return divRound(quantityUnits(item.quantity) * item.unitPriceCents, 10000);
 }
 
 export interface VatLine {
@@ -202,7 +217,7 @@ export function totals(items: LineItem[], smallBusiness: boolean): Totals {
   if (!smallBusiness) {
     for (const rate of [...bases.keys()].filter((r) => r > 0).sort((a, b) => a - b)) {
       const base = bases.get(rate)!;
-      vat.push({ rate, baseCents: base, vatCents: Math.round((base * rate) / 100) });
+      vat.push({ rate, baseCents: base, vatCents: divRound(base * rate, 100) });
     }
   }
   const vatSum = vat.reduce((s, v) => s + v.vatCents, 0);
@@ -241,8 +256,12 @@ export function addDaysIso(iso: string, days: number): string {
   ).padStart(2, '0')}`;
 }
 
+/// Überfällig sind nur offene Rechnungen — Gutschriften, Stornos,
+/// Angebote, AB und Lieferscheine sind keine Forderungen.
 export function isOverdue(doc: Doc): boolean {
-  return doc.status === 'open' && !!doc.dueDate && doc.dueDate < todayIso();
+  return (
+    doc.kind === 'invoice' && doc.status === 'open' && !!doc.dueDate && doc.dueDate < todayIso()
+  );
 }
 
 /** Vorschau des Nummernkreises, z. B. "RE-2026-0001" — spiegelt core::next_number. */
@@ -258,15 +277,39 @@ export function numberPreview(
     : `${prefix}${separator}${counter}`;
 }
 
-/// Parse a money input ("1.234,56" or "1234.56") to cents — NaN-safe.
+/// Parse a money input to cents — NaN-safe. Akzeptiert deutsche und
+/// englische Schreibweisen: "1.234,56", "1234,56", "1,234.56", "1234.56",
+/// "12,5", "-5". Stehen Punkt und Komma beide drin, ist das letzte der
+/// Dezimaltrenner; ein einzelner Trenner vor genau drei Ziffern gilt als
+/// Tausenderpunkt ("1.234" = 1234), sonst als Dezimaltrenner.
 export function parseMoney(raw: string): number {
-  const cleaned = raw
-    .trim()
-    .replace(/[€\s]/g, '')
-    .replace(/\.(?=\d{3}(\D|$))/g, '')
-    .replace(',', '.');
-  const value = Number(cleaned);
-  return Number.isFinite(value) ? Math.round(value * 100) : 0;
+  let s = raw.trim().replace(/[€\s\u00a0\u202f']/g, '');
+  const lastDot = s.lastIndexOf('.');
+  const lastComma = s.lastIndexOf(',');
+  if (lastDot >= 0 && lastComma >= 0) {
+    const decimal = lastDot > lastComma ? '.' : ',';
+    const thousands = decimal === '.' ? ',' : '.';
+    s = s.split(thousands).join('').replace(decimal, '.');
+  } else if (lastComma >= 0 || lastDot >= 0) {
+    const sep = lastComma >= 0 ? ',' : '.';
+    const parts = s.split(sep);
+    const isThousands =
+      parts.length > 2 || (parts.length === 2 && parts[1].length === 3 && sep === '.');
+    s = isThousands ? parts.join('') : parts.join('.');
+  }
+  const value = Number(s);
+  if (!Number.isFinite(value)) return 0;
+  // auf ganze Cents runden (symmetrisch)
+  const cents = Math.round(Math.abs(value) * 100);
+  return value < 0 ? -cents : cents;
+}
+
+/// Fehler aus dem Backend (Fehlercode wie "doc-finalized" oder
+/// "save-failed: …") in einen lesbaren Text übersetzen.
+export function errText(e: unknown, errors: Record<string, string>): string {
+  const raw = String(e);
+  const code = raw.split(':')[0].trim();
+  return errors[code] ?? raw;
 }
 
 export function centsToInput(cents: number, lang: 'de' | 'en'): string {

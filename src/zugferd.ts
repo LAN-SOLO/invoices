@@ -22,7 +22,16 @@ function b64ToBytes(b64: string): Uint8Array {
   return bytes;
 }
 
-function xmp(title: string, dateIso: string): string {
+function xmlEscape(s: string): string {
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+function xmp(rawTitle: string, dateIso: string): string {
+  const title = xmlEscape(rawTitle);
   return `<?xpacket begin="﻿" id="W5M0MpCehiHzreSzNTczkc9d"?>
 <x:xmpmeta xmlns:x="adobe:ns:meta/">
  <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">

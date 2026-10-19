@@ -12,6 +12,7 @@ import {
   UpdateInfo,
   addDaysIso,
   api,
+  errText,
   fmtDate,
   fmtMoney,
   isOverdue,
@@ -83,11 +84,16 @@ export default function App() {
   const lang: Lang = settings?.language ?? 'de';
   const t = dicts[lang];
 
-  const showToast = useCallback((msg: string) => {
+  const showToast = useCallback((msg: string, ms = 1800) => {
     setToast(msg);
     window.clearTimeout(toastTimer.current);
-    toastTimer.current = window.setTimeout(() => setToast(null), 1800);
+    // längere Meldungen (Fehler) bleiben länger stehen
+    toastTimer.current = window.setTimeout(() => setToast(null), Math.max(ms, msg.length * 45));
   }, []);
+  const showError = useCallback(
+    (e: unknown) => showToast(errText(e, t.errors), 4000),
+    [showToast, t]
+  );
 
   const refresh = useCallback(() => {
     api.listDocs(query).then(setDocs).catch(() => {});
@@ -100,6 +106,13 @@ export default function App() {
   useEffect(() => {
     api.getSettings().then((s) => {
       setSettings(s);
+      // unlesbare Datenbank wurde beim Start zur Seite gelegt → deutlich melden
+      api
+        .startupNotice()
+        .then((path) => {
+          if (path) window.alert(dicts[s.language ?? 'de'].dbQuarantined(path));
+        })
+        .catch(() => {});
       // stiller Update-Check beim Start — mit Auto-Update wird direkt
       // installiert, sonst nur der Banner gezeigt
       api
@@ -202,7 +215,7 @@ export default function App() {
       if (!silent) showToast(t.saved);
       return true;
     } catch (e) {
-      showToast(String(e));
+      showError(e);
       return false;
     }
   };
@@ -218,7 +231,7 @@ export default function App() {
       setEditorDoc(finalized);
       showToast(`${t.finalized}: ${finalized.number}`);
     } catch (e) {
-      showToast(String(e));
+      showError(e);
     }
   };
 
@@ -238,7 +251,7 @@ export default function App() {
       await api.writeFile(path, bytesToBase64(bytes));
       showToast(t.pdfSaved);
     } catch (e) {
-      showToast(String(e));
+      showError(e);
     }
   };
 
@@ -253,7 +266,7 @@ export default function App() {
       await api.writeFile(path, bytesToBase64(new TextEncoder().encode(xml)));
       showToast(t.xmlSaved);
     } catch (e) {
-      showToast(String(e));
+      showError(e);
     }
   };
 
@@ -277,7 +290,7 @@ export default function App() {
       await api.writeFile(path, bytesToBase64(hybrid));
       showToast(t.zugferdSaved);
     } catch (e) {
-      showToast(String(e));
+      showError(e);
     }
   };
 
@@ -287,7 +300,7 @@ export default function App() {
       const storno = await api.cancelDoc(doc.id, uid());
       showToast(`${t.cancelled}: ${storno.number}`);
     } catch (e) {
-      showToast(String(e));
+      showError(e);
     }
   };
 
@@ -298,7 +311,8 @@ export default function App() {
       case 'draft':
         return doc.status === 'draft';
       case 'open':
-        return doc.status === 'open';
+        // offene Posten = offene Rechnungen (andere Belegarten sind keine Forderung)
+        return doc.kind === 'invoice' && doc.status === 'open';
       case 'overdue':
         return isOverdue(doc);
       case 'paid':
@@ -328,6 +342,7 @@ export default function App() {
     if (doc.status === 'paid') return <span className="chip mini ok">{t.statusPaid}</span>;
     if (doc.status === 'cancelled') return <span className="chip mini dim">{t.statusCancelled}</span>;
     if (isOverdue(doc)) return <span className="chip mini bad">{t.statusOverdue}</span>;
+    if (doc.kind !== 'invoice') return <span className="chip mini">{t.statusFinal}</span>;
     return <span className="chip mini warn">{t.statusOpen}</span>;
   };
 
@@ -467,6 +482,9 @@ export default function App() {
       ) : null}
       {editorDoc ? (
         <DocEditor
+          // nach dem Festschreiben neu aufbauen — der Editor hält eine
+          // lokale Kopie, die sonst Nummer und Status des Entwurfs behielte
+          key={`${editorDoc.id}:${editorDoc.status}:${editorDoc.number ?? ''}`}
           doc={editorDoc}
           customers={customers}
           products={products}
@@ -596,7 +614,12 @@ export default function App() {
                             <button
                               className="icon"
                               title={t.actMarkPaid}
-                              onClick={() => api.setPaid(doc.id, true).then(() => showToast(t.markedPaid))}
+                              onClick={() =>
+                                api
+                                  .setPaid(doc.id, true)
+                                  .then(() => showToast(t.markedPaid))
+                                  .catch(showError)
+                              }
                             >
                               <IconCheck />
                             </button>
@@ -605,7 +628,12 @@ export default function App() {
                             <button
                               className="icon"
                               title={t.actMarkUnpaid}
-                              onClick={() => api.setPaid(doc.id, false).then(() => showToast(t.markedUnpaid))}
+                              onClick={() =>
+                                api
+                                  .setPaid(doc.id, false)
+                                  .then(() => showToast(t.markedUnpaid))
+                                  .catch(showError)
+                              }
                             >
                               <IconCheck />
                             </button>
@@ -629,7 +657,8 @@ export default function App() {
                                 className="icon danger"
                                 title={t.actDelete}
                                 onClick={() => {
-                                  if (window.confirm(t.confirmDeleteDraft)) api.deleteDoc(doc.id);
+                                  if (window.confirm(t.confirmDeleteDraft))
+                                    api.deleteDoc(doc.id).catch(showError);
                                 }}
                               >
                                 <IconTrash />
@@ -680,7 +709,7 @@ export default function App() {
                           title={t.actDelete}
                           onClick={() => {
                             if (!window.confirm(t.confirmDeleteCustomer)) return;
-                            api.deleteCustomer(c.id).catch(() => showToast(t.customerInDraft));
+                            api.deleteCustomer(c.id).catch(showError);
                           }}
                         >
                           <IconTrash />
@@ -725,7 +754,8 @@ export default function App() {
                           className="icon danger"
                           title={t.actDelete}
                           onClick={() => {
-                            if (window.confirm(t.confirmDeleteProduct)) api.deleteProduct(p.id);
+                            if (window.confirm(t.confirmDeleteProduct))
+                              api.deleteProduct(p.id).catch(showError);
                           }}
                         >
                           <IconTrash />
@@ -745,10 +775,13 @@ export default function App() {
           t={t}
           onClose={() => setEditCustomer(null)}
           onSave={(c) => {
-            api.upsertCustomer(c).then(() => {
-              setEditCustomer(null);
-              showToast(t.saved);
-            });
+            api
+              .upsertCustomer(c)
+              .then(() => {
+                setEditCustomer(null);
+                showToast(t.saved);
+              })
+              .catch(showError);
           }}
         />
       )}
@@ -760,10 +793,13 @@ export default function App() {
           lang={lang}
           onClose={() => setEditProduct(null)}
           onSave={(p) => {
-            api.upsertProduct(p).then(() => {
-              setEditProduct(null);
-              showToast(t.saved);
-            });
+            api
+              .upsertProduct(p)
+              .then(() => {
+                setEditProduct(null);
+                showToast(t.saved);
+              })
+              .catch(showError);
           }}
         />
       )}
@@ -797,7 +833,8 @@ export default function App() {
               .then(() => {
                 setTemplateSource(null);
                 showToast(t.templateSaved);
-              });
+              })
+              .catch(showError);
           }}
         />
       )}
@@ -809,7 +846,7 @@ export default function App() {
           t={t}
           onClose={() => setShowTemplates(false)}
           onUse={newDocFromTemplate}
-          onDelete={(id) => api.deleteTemplate(id)}
+          onDelete={(id) => api.deleteTemplate(id).catch(showError)}
         />
       )}
 
@@ -823,17 +860,23 @@ export default function App() {
             setShowSettings(false);
           }}
           onSave={(s) => {
-            api.setSettings(s).then(() => {
-              setSettings(s);
-              setShowSettings(false);
-            });
+            api
+              .setSettings(s)
+              .then(() => {
+                setSettings(s);
+                setShowSettings(false);
+              })
+              .catch(showError);
           }}
           onLive={(s) => setSettings(s)}
-          onCompanyChanged={() => {
+          onError={showError}
+          onReloaded={(msg) => {
+            // Firmenwechsel / Wiederherstellung: alles frisch vom Backend
             api.getSettings().then(setSettings);
             refresh();
+            setEditorDoc(null);
             setShowSettings(false);
-            showToast(t.companySwitched);
+            showToast(msg);
           }}
         />
       )}

@@ -202,7 +202,7 @@ export function TemplatesModal({
           <div key={template.id} className="template-row">
             <button className="grow1 tpl-use" onClick={() => onUse(template)}>
               {template.name}
-              <span className="dim"> · {kindLabel(template.kind)} · {template.items.length} Pos.</span>
+              <span className="dim"> · {kindLabel(template.kind)} · {template.items.length} {t.posShort}</span>
             </button>
             <button
               className="icon danger"

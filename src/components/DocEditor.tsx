@@ -76,6 +76,18 @@ export function DocEditor({
     return Number.isFinite(value) && value > 0 ? value : 1;
   };
 
+  /// Noch nicht per Blur übernommene Mengen/Preise einrechnen — so geht
+  /// beim direkten Klick auf Speichern/Festschreiben (oder per Tastatur)
+  /// keine Eingabe verloren.
+  const committed = (): Doc => ({
+    ...d,
+    items: d.items.map((item, i) => ({
+      ...item,
+      quantity: qtyStr[i] !== undefined ? parseQty(qtyStr[i]) : item.quantity,
+      unitPriceCents: priceStr[i] !== undefined ? parseMoney(priceStr[i]) : item.unitPriceCents,
+    })),
+  });
+
   const addItem = (product?: Product) => {
     const item: LineItem = product
       ? {
@@ -140,7 +152,7 @@ export function DocEditor({
         <span className="editor-title">{title}</span>
         {doc.status === 'draft' && <span className="chip mini">{t.editorDraft}</span>}
         <span className="spacer" />
-        <button className="ghost" onClick={() => onPreview(d)}>
+        <button className="ghost" onClick={() => onPreview(readOnly ? d : committed())}>
           {t.actPreview}
         </button>
         {readOnly && (
@@ -401,11 +413,11 @@ export function DocEditor({
           <>
             <div className="note">{t.finalizeHint}</div>
             <div className="btnrow">
-              <button className="ghost" onClick={() => onSaveTemplate(d)}>
+              <button className="ghost" onClick={() => onSaveTemplate(committed())}>
                 {t.saveAsTemplate}
               </button>
-              <button onClick={() => onSaveDraft(d)}>{t.saveDraft}</button>
-              <button className="primary" onClick={() => onFinalize(d)}>
+              <button onClick={() => onSaveDraft(committed())}>{t.saveDraft}</button>
+              <button className="primary" onClick={() => onFinalize(committed())}>
                 {t.finalize}
               </button>
             </div>

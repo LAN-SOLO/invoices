@@ -1,10 +1,9 @@
 import { useEffect, useState } from 'react';
+import { getVersion } from '@tauri-apps/api/app';
 import { open, save } from '@tauri-apps/plugin-dialog';
-import { api, CompanyRegistry, numberPreview, Settings, UpdateInfo } from '../api';
+import { api, CompanyRegistry, errText, numberPreview, Settings, UpdateInfo } from '../api';
 import { Dict } from '../i18n';
 import { SCHEMES } from '../schemes';
-
-const APP_VERSION = '0.4.0';
 
 type SetTab = 'company' | 'design' | 'security' | 'app';
 
@@ -18,14 +17,17 @@ export function SettingsModal({
   onClose,
   onSave,
   onLive,
-  onCompanyChanged,
+  onError,
+  onReloaded,
 }: {
   settings: Settings;
   t: Dict;
   onClose: () => void;
   onSave: (s: Settings) => void;
   onLive: (s: Settings) => void;
-  onCompanyChanged: () => void;
+  onError: (e: unknown) => void;
+  /** Firmenwechsel oder Wiederherstellung — App lädt alles neu. */
+  onReloaded: (msg: string) => void;
 }) {
   const [tab, setTab] = useState<SetTab>('company');
   const [s, setS] = useState<Settings>({ ...settings });
@@ -35,32 +37,35 @@ export function SettingsModal({
   const [backupMsg, setBackupMsg] = useState('');
   const [registry, setRegistry] = useState<CompanyRegistry | null>(null);
   const [newCompanyName, setNewCompanyName] = useState('');
+  const [appVersion, setAppVersion] = useState('');
 
   useEffect(() => {
     api.listCompanies().then(setRegistry).catch(() => {});
+    getVersion()
+      .then(setAppVersion)
+      .catch(() => setAppVersion('—'));
   }, []);
 
+  // Änderungen wirken live: lokaler Stand + App-Stand gemeinsam setzen
+  // (nicht im setState-Updater — der darf keine Seiteneffekte haben)
+  const patchSettings = (patch: Partial<Settings>) => {
+    const next = { ...s, ...patch };
+    setS(next);
+    onLive(next);
+  };
+
   const set = <K extends keyof Settings>(key: K, value: Settings[K]) =>
-    setS((prev) => {
-      const next = { ...prev, [key]: value };
-      onLive(next);
-      return next;
-    });
+    patchSettings({ [key]: value } as Partial<Settings>);
 
   const applyScheme = (id: string) => {
     const scheme = SCHEMES.find((x) => x.id === id);
     if (!scheme) return;
-    setS((prev) => {
-      const next = {
-        ...prev,
-        pdfScheme: id,
-        pdfC1: scheme.c1,
-        pdfC2: scheme.c2,
-        pdfC3: scheme.c3,
-        pdfC4: scheme.c4,
-      };
-      onLive(next);
-      return next;
+    patchSettings({
+      pdfScheme: id,
+      pdfC1: scheme.c1,
+      pdfC2: scheme.c2,
+      pdfC3: scheme.c3,
+      pdfC4: scheme.c4,
     });
   };
 
@@ -87,7 +92,7 @@ export function SettingsModal({
       await api.exportBackup(path);
       setBackupMsg(t.backupDone);
     } catch (e) {
-      setBackupMsg(String(e));
+      setBackupMsg(errText(e, t.errors));
     }
   };
 
@@ -97,13 +102,12 @@ export function SettingsModal({
     if (!window.confirm(t.restoreConfirm)) return;
     try {
       await api.importBackup(picked);
-      setBackupMsg(t.restoreDone);
-      api.getSettings().then((fresh) => {
-        setS(fresh);
-        onLive(fresh);
-      });
-    } catch {
-      setBackupMsg(t.restoreFailed);
+      // Backend hat Daten UND Einstellungen ersetzt — Modal schließen und
+      // die App frisch laden (sonst würde „Abbrechen“ den alten Stand
+      // in der Oberfläche zurückholen)
+      onReloaded(t.restoreDone);
+    } catch (e) {
+      setBackupMsg(errText(e, t.errors));
     }
   };
 
@@ -165,7 +169,10 @@ export function SettingsModal({
                     value={registry.active}
                     onChange={(e) => {
                       const id = e.target.value;
-                      api.switchCompany(id).then(() => onCompanyChanged());
+                      api
+                        .switchCompany(id)
+                        .then(() => onReloaded(t.companySwitched))
+                        .catch(onError);
                     }}
                   >
                     {registry.list.map((c) => (
@@ -183,9 +190,10 @@ export function SettingsModal({
                         title={`✕ ${c.label}`}
                         onClick={() => {
                           if (!window.confirm(t.confirmDeleteCompany)) return;
-                          api.deleteCompany(c.id).then(() =>
-                            api.listCompanies().then(setRegistry)
-                          );
+                          api
+                            .deleteCompany(c.id)
+                            .then(() => api.listCompanies().then(setRegistry))
+                            .catch(onError);
                         }}
                       >
                         ✕
@@ -204,7 +212,8 @@ export function SettingsModal({
                     onClick={() => {
                       api
                         .addCompany(crypto.randomUUID(), newCompanyName.trim())
-                        .then(() => onCompanyChanged());
+                        .then(() => onReloaded(t.companySwitched))
+                        .catch(onError);
                     }}
                   >
                     {t.addCompany}
@@ -537,13 +546,7 @@ export function SettingsModal({
                   <input
                     type="color"
                     value={s[key]}
-                    onChange={(e) => {
-                      setS((prev) => {
-                        const next = { ...prev, [key]: e.target.value, pdfScheme: 'custom' };
-                        onLive(next);
-                        return next;
-                      });
-                    }}
+                    onChange={(e) => patchSettings({ [key]: e.target.value, pdfScheme: 'custom' })}
                   />
                 </label>
               ))}
@@ -684,7 +687,7 @@ export function SettingsModal({
             </label>
             <div className="updatebox">
               <span>
-                {t.version} {APP_VERSION}
+                {t.version} {appVersion}
               </span>
               <button onClick={checkUpdates} disabled={updState === 'checking'}>
                 {updState === 'checking' ? t.checking : t.checkUpdates}
@@ -718,7 +721,14 @@ export function SettingsModal({
           <button onClick={onClose}>{t.cancel}</button>
           <button
             className="primary"
-            disabled={!s.invoicePrefix.trim() || !s.creditPrefix.trim() || !s.cancelPrefix.trim()}
+            disabled={[
+              s.invoicePrefix,
+              s.creditPrefix,
+              s.cancelPrefix,
+              s.quotePrefix,
+              s.orderPrefix,
+              s.deliveryPrefix,
+            ].some((p) => !p.trim())}
             onClick={() => onSave(s)}
           >
             {t.save}
