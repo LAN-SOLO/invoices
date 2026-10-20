@@ -251,7 +251,7 @@ const de = {
   countryCode: 'Land (ISO-Code)',
   secEInvoice: 'E-Rechnung',
   einvoiceNote:
-    '// invoices erzeugt E-Rechnungen nach EN 16931: XRechnung-XML und ZUGFeRD-PDF (PDF mit eingebettetem factur-x.xml) — pro festgeschriebenem Beleg über die Beleg-Aktionen. Für Behörden (B2G) braucht der Kunde eine Leitweg-ID (Feld in der Kundenkartei). PLZ und Ort gehören als eigene Zeile in die Anschrift („20095 Hamburg“), damit die E-Rechnung sie sauber übernimmt.',
+    '// invoices erzeugt E-Rechnungen nach EN 16931: XRechnung-XML und ZUGFeRD-PDF (PDF mit eingebettetem factur-x.xml) — pro festgeschriebener Rechnung, Gutschrift oder Stornorechnung über die Beleg-Aktionen. Für Behörden (B2G) braucht der Kunde eine Leitweg-ID (Feld in der Kundenkartei). PLZ und Ort gehören als eigene Zeile in die Anschrift („20095 Hamburg“), damit die E-Rechnung sie sauber übernimmt.',
   pdfFooter: 'Fußzeile auf dem PDF (optional)',
   pdfFooterHint: 'z. B. „Vielen Dank für Ihren Auftrag.“',
   dataNote:
@@ -324,6 +324,8 @@ const de = {
     'read-failed': 'Datei konnte nicht gelesen werden.',
     'auto-backup-failed': 'Das automatische Backup beim Start ist fehlgeschlagen — ist der Backup-Ordner erreichbar?',
     'restore-safety-failed': 'Wiederherstellung abgebrochen: Die Sicherheitskopie des aktuellen Stands ließ sich nicht anlegen. Es wurde nichts verändert.',
+    'restore-rolled-back': 'Wiederherstellung abgebrochen: Die Einstellungen ließen sich nicht speichern, die Datenbank wurde auf den vorherigen Stand zurückgesetzt. Es wurde nichts verändert.',
+    'restore-partial': 'Wiederherstellung unvollständig: Die Daten sind wiederhergestellt, die Einstellungen nicht. Der vorherige Stand liegt als „db.json.before-restore-…“ im Datenordner.',
     'update-check-failed': 'Update-Prüfung fehlgeschlagen — besteht eine Internetverbindung?',
     'update-failed': 'Update konnte nicht geladen oder installiert werden.',
     'update-none': 'Kein Update verfügbar.',
@@ -606,7 +608,7 @@ const en: typeof de = {
   countryCode: 'Country (ISO code)',
   secEInvoice: 'E-invoicing',
   einvoiceNote:
-    '// invoices generates e-invoices per EN 16931: XRechnung XML and ZUGFeRD PDF (PDF with embedded factur-x.xml) — per finalized document via the document actions. For public authorities (B2G) the customer needs a Leitweg-ID (field in the customer record). Postcode and city belong on their own address line (“20095 Hamburg”) so the e-invoice picks them up cleanly.',
+    '// invoices generates e-invoices per EN 16931: XRechnung XML and ZUGFeRD PDF (PDF with embedded factur-x.xml) — per finalized invoice, credit note or cancellation via the document actions. For public authorities (B2G) the customer needs a Leitweg-ID (field in the customer record). Postcode and city belong on their own address line (“20095 Hamburg”) so the e-invoice picks them up cleanly.',
   pdfFooter: 'PDF footer line (optional)',
   pdfFooterHint: 'e.g. “Thank you for your business.”',
   dataNote:
@@ -678,6 +680,8 @@ const en: typeof de = {
     'read-failed': 'The file could not be read.',
     'auto-backup-failed': 'The automatic backup on launch failed — is the backup folder reachable?',
     'restore-safety-failed': 'Restore aborted: the safety copy of the current data could not be created. Nothing was changed.',
+    'restore-rolled-back': 'Restore aborted: the settings could not be saved, so the database was reset to its previous state. Nothing was changed.',
+    'restore-partial': 'Restore incomplete: the data was restored, the settings were not. The previous state is kept as “db.json.before-restore-…” in the data folder.',
     'update-check-failed': 'Update check failed — is there an internet connection?',
     'update-failed': 'The update could not be downloaded or installed.',
     'update-none': 'No update available.',

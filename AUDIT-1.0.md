@@ -122,7 +122,7 @@ Jeweils mit frischem Profil **und** mit einem Datenstand aus 0.4.0 (Update-Pfad)
 
 ```sh
 pnpm build                      # tsc + vite build — fehlerfrei
-cargo test --workspace          # 34 Core-Tests + 12 Backend-Tests (+1 nur unter Windows)
+cargo test --workspace          # 35 Core-Tests + 13 Backend-Tests (+1 nur unter Windows)
 INVOICES_XML_DUMP=<ordner> cargo test -p invoices-core dump   # Beispiel-XMLs für Validatoren
 java -jar Mustang-CLI-2.26.0.jar --action validate --source <ordner>/invoice.xml
 ```
@@ -216,3 +216,56 @@ Nur auf echter Hardware prüfbar (zusätzlich zu Abschnitt 5 Punkte 1–20 und A
 25. Windows: `db.json` im Editor öffnen, speichern (UTF-8 mit BOM), App starten → Daten da, kein Quarantäne-Hinweis.
 26. Windows: native Rückfragen zeigen die eigenen Knopftexte („Stornieren“/„Abbrechen“) und Esc bricht ab (rfd nutzt mit `common-controls-v6` den TaskDialog; das Standard-Manifest von tauri-build 2.6.3 bindet Common Controls 6.0 ein — im Quelltext geprüft, nicht ausgeführt).
 
+
+## 10. Runde 3 (2026-10-20, Abschluss)
+
+Ausgangsstand `c705845`. Schwerpunkt: jede Faktenaussage aus Hilfe (DE/EN), README und In-App-Texten gegen den Code geprüft; End-to-end-Journeys im Headless-Chromium; Restposten PDF/A, jsPDF/DOMPurify, Teil-Wiederherstellung.
+
+Falsche Aussagen — Code korrigiert:
+
+1. **„Beim Festschreiben wird die Kunden-Anschrift eingefroren“** stimmte nicht: Name/Anschrift wurden beim *Auswählen* des Kunden im Entwurf kopiert. Wer die Anschrift danach in der Kundenkartei korrigierte, bekam beim Festschreiben die alte. Jetzt übernimmt „Festschreiben“ Name und Anschrift aus dem aktuellen Kundenstand (`App.tsx` `finalize`). Journey-Test schlug vor dem Fix nachweislich fehl.
+2. **Dashboard-Umsatz** (Hilfe: „Rechnungen minus Gutschriften und Stornos“): Eine stornierte Rechnung zählte 0 **und** ihre Stornorechnung wurde abgezogen — Umsatz und Top-Kunden wurden um den Betrag zu niedrig (negativ). Jetzt zählt die stornierte Rechnung weiter, Storno hebt sie auf (Netto 0).
+3. **Artikel-Preis ohne Blur verloren** (Hilfe/Runde 1: „Preise … übernimmt der Editor auch direkt nach dem Tippen“ — galt nur für den Beleg-Editor): Im Artikel-Dialog ging ein getippter Preis beim direkten Klick auf „Speichern“ verloren (0 €). Jetzt wird der Text beim Speichern geparst. Vorher nachweislich 0.
+4. **Fälligkeit von Gutschrift/AB/Lieferschein** folgte einem geänderten Belegdatum nicht (blieb auf dem Anlagedatum, konnte vor dem Belegdatum liegen und ging so in die E-Rechnung der Gutschrift). Jetzt = Belegdatum, wie beim Anlegen.
+
+Falsche/ungenaue Aussagen — Text korrigiert (DE + EN gleichlautend):
+
+- Kunden: „mehrzeilig oder strukturiert“ → es gibt nur strukturierte Felder (Straße, PLZ, Ort, Land); alte mehrzeilige Anschriften werden beim Öffnen übernommen. Ergänzt: E-Mail/USt-IdNr./Leitweg-ID kommen live aus der Kartei.
+- „Als Rechnung übernehmen“: „Kunde, Positionen und Texte“ → Einleitungstext ja, interne Notiz nein.
+- Rückfragen: Knopfliste um „Verwerfen“/„Entfernen“ (Discard/Remove) ergänzt.
+- Updates: „Vor der Installation siehst du das Changelog“ → nur unter Einstellungen → App; der Banner zeigt nur die Version.
+- E-Rechnung (Hilfe + Einstellungen-Hinweis): Aktionen gibt es für Rechnung, Gutschrift **und** Stornorechnung, nicht für „jeden festgeschriebenen Beleg“ (Angebot/AB/Lieferschein haben keine).
+- Layout „Modern“: Kopfband in der Akzentfarbe des **PDF-Farbschemas** (nicht der App-Akzentfarbe).
+- Datenablage: weitere Unternehmen liegen in Unterordnern `company-…`.
+
+Geprüft und zutreffend (Auswahl): 20 Farbschemata, 4 Akzentfarben, Stellen 3–6, Trennzeichen -,/,ohne; Präfixe RE/GS/ST/AN/AB/LS; Zahlungsziel/Standard-USt/Einheit/Einleitung nur für neue Rechnungen; §19 je Beleg eingefroren; Storno nur für offene/bezahlte Rechnungen, Jahr des Erstellungstags, Leistungsdatum vom Original; Storno-Preis negiert → im XML negative Menge (BR-27); Auto-Backup behält 10; Rename-Wiederholung bei gesperrter Datei (5 Versuche, Temp-Datei wird entfernt); Notiz erscheint nicht auf dem PDF; Lieferschein ohne Preise; Fällige Rechnungen (6), Top-5-Kunden, 12 Monate; Update-Endpoint GitHub mit Pubkey; Identifier `com.lan-solo.invoices`.
+
+Restposten:
+
+- **Teil-Wiederherstellung:** Scheitert nach dem Schreiben der Datenbank das Speichern der Einstellungen, wird die Datenbank jetzt auf den vorherigen Stand zurückgeschrieben (Speicher + Platte) → `restore-rolled-back`, „nichts verändert“. Scheitert auch der Rückweg → `restore-partial` (Hinweis auf `db.json.before-restore-…`), die Oberfläche lädt die Listen neu. Beide Codes DE/EN übersetzt. Neuer Rust-Test `restore_rolls_back_db_when_settings_cannot_be_written`.
+- **PDF/A-3b:** Schriften lassen sich mit dem vorhandenen Stand **nicht** einbetten — im Repo und im Lockfile gibt es keine TTF/OTF (`@pdf-lib/standard-fonts` enthält nur AFM-Metriken, `fontkit` fehlt). Eine frei lizenzierte Schrift (z. B. DejaVu/Liberation/Noto) müsste als neues Asset aufgenommen und mit `addFont` (Identity-H) eingebunden werden → Entscheidung des Inhabers, 1.1. **Behoben** wurde die Metadaten-Konsistenz (ISO 19005-3, 6.6.2.3): jsPDF schrieb `Producer (jsPDF 2.5.2)` und ein eigenes `CreationDate` ins Info-Dictionary, das XMP hatte kein `pdf:Producer` und ein Datum mit Millisekunden. Jetzt setzen `embedZugferd` Info-Title/Producer/Creator/CreationDate/ModDate und XMP (`pdf:Producer`, `xmp:CreateDate` sekundengenau UTC) auf identische Werte. Im exportierten ZUGFeRD-PDF (UI-Harness, echte Bytes) geprüft: Info-Producer = XMP-Producer, Info-CreationDate = XMP-CreateDate, `/AF` + `factur-x.xml`, `GTS_PDFA1`-OutputIntent. veraPDF/Mustang wurden **nicht** erneut ausgeführt (nicht installiert).
+- **jsPDF 2.5.2 / DOMPurify:** Es gibt kein Patch-/Minor-Update, das Befunde schließt — jsPDF-Fixes ab 3.0.5 bzw. 4.2.1 (Major, verlangt jspdf-autotable 5), DOMPurify-Fixes nur in 3.x, jsPDF 2.5.2 verlangt `^2.5.4`. `pnpm audit` unverändert 29; Erreichbarkeit wie in Abschnitt 9 (DOMPurify liegt nur als nachgeladener Chunk für das ungenutzte `jsPDF.html()` im Bundle). Bleibt für 1.1.
+
+End-to-end-Journeys (UI-Mock im Headless-Chromium, DE/EN × Hell/Dunkel; „Neustart“ = Seite neu laden, Mock-Datenbank und Einstellungen überleben in `sessionStorage`; Mock wie Runde 2 mit Plugin-2.7-Verhalten, `window.confirm` als Falle, Storno mit negiertem Preis wie `core::workflow::cancel`):
+
+1. Erststart: `navigator.language` de-DE/en-US → Sprache, Tutorial erscheint.
+2. Briefkopf speichern → Neustart → Firmenname da, Tutorial nicht erneut.
+3. Kunde mit Straße/PLZ/Ort → Anschrift zusammengesetzt; Artikel mit „1.234,50“/„1,234.50“ ohne Blur gespeichert.
+4. Rechnung: Artikel + freie Position, Menge „2,5“ ohne Blur, Entwurf speichern → **Neustart mitten in der Arbeit** → Entwurf da; Kundenanschrift ändern → festschreiben → RE-JJJJ-0001 mit neuer Anschrift, Titel zeigt Nummer.
+5. Export: Speichern-Dialog abgebrochen (nichts geschrieben, kein Fehler), Platte voll (os error 28), schreibgeschützter Ordner (os error 13), Erfolg; XML; ZUGFeRD mit Metadatenprüfung.
+6. Bezahlt → offen → Storno → ST-JJJJ-0001; Dashboard-Umsatz vorher > 0, nachher 0,00 €.
+7. Angebot („Gültig bis“) festschreiben → AN-JJJJ-0001 → „Als Rechnung übernehmen“ → Einleitung übernommen, Notiz leer, Entwurf mit Herkunft.
+8. Gutschrift: Belegdatum ändern → Fälligkeit folgt.
+9. Vorlage speichern, daraus Entwurf (unberührt → „Zurück“ ohne Rückfrage), löschen mit Abbrechen/OK.
+10. Wiederherstellen: `restore-rolled-back` und `restore-partial` übersetzt, Dialog bleibt offen.
+
+Ergebnis: Journeys 47/47 je Kombination (vor den Fixes 9 Prüfungen rot), Regression aus Runde 2 51/51 je Kombination.
+
+Ausgeführt: `cargo test --workspace` (13 Backend + 35 Core), `cargo clippy --workspace --all-targets` (nur die vorbestehenden Stil-Warnungen, keine neuen), Windows-Typecheck `cargo check --target x86_64-pc-windows-msvc --workspace --tests`, `pnpm build`, `cargo audit` (nur bekannte `zip`-Advisories über tauri-plugin-updater + Unmaintained), `pnpm audit` (29, s. o.).
+
+Nur auf echter Hardware prüfbar (zusätzlich zu Punkten 1–26):
+
+27. Kunde in Rechnungsentwurf wählen, Anschrift in der Kundenkartei ändern, Entwurf festschreiben → PDF zeigt neue Anschrift.
+28. Artikel anlegen, Preis tippen und sofort „Speichern“ klicken (macOS-WebKit und WebView2) → Preis erhalten.
+29. ZUGFeRD-PDF mit veraPDF (PDF/A-3b) prüfen: erwartet nur noch die Schrift-Regeln (6.2.11.4.1), keine Metadaten-Regeln (6.6.2.3.x); Mustang: XML valide.
+30. Wiederherstellen, während die Einstellungsdatei schreibgeschützt ist (macOS `chmod -w settings*.json` bzw. Windows Schreibschutz) → Meldung „zurückgesetzt … nichts verändert“, Daten unverändert.

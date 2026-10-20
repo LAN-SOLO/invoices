@@ -234,7 +234,7 @@ export function DocEditor({
                   dueDate:
                     prev.kind === 'invoice' || prev.kind === 'quote'
                       ? addDaysIso(date, settings.paymentTermsDays)
-                      : prev.dueDate,
+                      : date, // ohne Fälligkeit: folgt dem Belegdatum (wie beim Anlegen)
                 }));
               }}
             />

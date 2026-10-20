@@ -288,7 +288,13 @@ export function ProductModal({
         </div>
         <div className="btnrow">
           <button onClick={onClose}>{t.cancel}</button>
-          <button className="primary" disabled={!p.name.trim()} onClick={() => onSave(p)}>
+          <button
+            className="primary"
+            disabled={!p.name.trim()}
+            // getippten Preis auch ohne vorheriges Blur übernehmen (WebKit
+            // fokussiert Knöpfe beim Klick nicht zwingend)
+            onClick={() => onSave({ ...p, unitPriceCents: parseMoney(priceStr) })}
+          >
             {t.save}
           </button>
         </div>

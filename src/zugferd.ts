@@ -30,6 +30,8 @@ function xmlEscape(s: string): string {
     .replace(/"/g, '&quot;');
 }
 
+const PRODUCER = 'invoices (LAN-SOLO)';
+
 function xmp(rawTitle: string, dateIso: string): string {
   const title = xmlEscape(rawTitle);
   return `<?xpacket begin="﻿" id="W5M0MpCehiHzreSzNTczkc9d"?>
@@ -43,9 +45,12 @@ function xmp(rawTitle: string, dateIso: string): string {
    <dc:title><rdf:Alt><rdf:li xml:lang="x-default">${title}</rdf:li></rdf:Alt></dc:title>
   </rdf:Description>
   <rdf:Description rdf:about="" xmlns:xmp="http://ns.adobe.com/xap/1.0/">
-   <xmp:CreatorTool>invoices (LAN-SOLO)</xmp:CreatorTool>
+   <xmp:CreatorTool>${PRODUCER}</xmp:CreatorTool>
    <xmp:CreateDate>${dateIso}</xmp:CreateDate>
    <xmp:ModifyDate>${dateIso}</xmp:ModifyDate>
+  </rdf:Description>
+  <rdf:Description rdf:about="" xmlns:pdf="http://ns.adobe.com/pdf/1.3/">
+   <pdf:Producer>${PRODUCER}</pdf:Producer>
   </rdf:Description>
   <rdf:Description rdf:about="" xmlns:pdfaExtension="http://www.aiim.org/pdfa/ns/extension/" xmlns:pdfaSchema="http://www.aiim.org/pdfa/ns/schema#" xmlns:pdfaProperty="http://www.aiim.org/pdfa/ns/property#">
    <pdfaExtension:schemas>
@@ -115,8 +120,21 @@ export async function embedZugferd(
     afRelationship: AFRelationship.Alternative,
   });
 
+  // PDF/A (ISO 19005-3, 6.6.2.3): Info-Dictionary und XMP müssen
+  // übereinstimmen. jsPDF schreibt eigenen Producer/eigenes Datum ins
+  // Info-Dictionary — beides hier auf dieselben Werte wie im XMP setzen
+  // (Datum sekundengenau in UTC, ohne Millisekunden).
+  const stamp = new Date(Math.floor(now.getTime() / 1000) * 1000);
+  pdf.setTitle(title);
+  pdf.setProducer(PRODUCER);
+  pdf.setCreator(PRODUCER);
+  pdf.setCreationDate(stamp);
+  pdf.setModificationDate(stamp);
+
   // XMP-Metadaten (PDF/A-3b + Factur-X-Extension)
-  const xmpBytes = new TextEncoder().encode(xmp(title, now.toISOString()));
+  const xmpBytes = new TextEncoder().encode(
+    xmp(title, stamp.toISOString().replace(/\.\d{3}Z$/, 'Z'))
+  );
   const metadataStream = pdf.context.stream(xmpBytes, {
     Type: 'Metadata',
     Subtype: 'XML',

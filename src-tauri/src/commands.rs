@@ -331,9 +331,12 @@ pub fn import_backup(app: AppHandle, st: State<'_, AppState>, path: String) -> R
     let raw = std::fs::read(&path).map_err(|e| format!("read-failed: {e}"))?;
     let backup = parse_backup(&raw)?;
     let active = st.active_company.lock().unwrap().clone();
-    restore_into(&st, backup, |s| settings::store_for(&app, &active, s))?;
-    let _ = app.emit("db-changed", ());
-    Ok(())
+    let res = restore_into(&st, backup, |s| settings::store_for(&app, &active, s));
+    // auch bei „restore-partial“ hat sich die Datenbank geändert
+    if res.as_ref().map_or_else(|e| e.starts_with("restore-partial"), |_| true) {
+        let _ = app.emit("db-changed", ());
+    }
+    res
 }
 
 /// Kern der Wiederherstellung (testbar ohne AppHandle): Sicherheitskopie,
@@ -356,12 +359,25 @@ fn restore_into(
     // Erst die Datenbank auf die Platte, dann die Einstellungen — und den
     // DB-Lock dabei halten, damit kein parallel laufender Befehl den alten
     // Speicher-Stand über die wiederhergestellte Datei schreibt.
-    {
-        let mut db = st.db.lock().unwrap();
-        invoices_core::save_db(&backup.db, &db_path).map_err(|e| format!("save-failed: {e}"))?;
-        *db = backup.db;
+    // Scheitert danach das Schreiben der Einstellungen, wird die Datenbank
+    // auf den vorherigen Stand zurückgesetzt — kein halb wiederhergestellter
+    // Zustand (neue Daten mit alten Einstellungen/Präfixen).
+    let mut db = st.db.lock().unwrap();
+    invoices_core::save_db(&backup.db, &db_path).map_err(|e| format!("save-failed: {e}"))?;
+    let previous = std::mem::replace(&mut *db, backup.db);
+    if let Err(e) = store_settings(&backup.settings) {
+        let detail = e.strip_prefix("save-failed: ").unwrap_or(&e).to_string();
+        return match invoices_core::save_db(&previous, &db_path) {
+            Ok(()) => {
+                *db = previous;
+                Err(format!("restore-rolled-back: {detail}"))
+            }
+            // Rückweg ebenfalls gescheitert: Speicher entspricht der Platte
+            // (wiederhergestellte DB), die Sicherheitskopie liegt daneben
+            Err(_) => Err(format!("restore-partial: {detail}")),
+        };
     }
-    store_settings(&backup.settings)?;
+    drop(db);
     *st.settings.lock().unwrap() = backup.settings;
     Ok(())
 }
@@ -889,6 +905,29 @@ mod tests {
             // als root laufen Rechte ins Leere — dann ist nichts zu prüfen
             eprintln!("skipped: permissions not enforced");
         }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn restore_rolls_back_db_when_settings_cannot_be_written() {
+        let dir = std::env::temp_dir().join(format!("invoices-rs3-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let st = test_state(&dir);
+        st.db.lock().unwrap().customers.push(invoices_core::Customer { id: "old".into(), name: "Alt".into(), ..Default::default() });
+        st.settings.lock().unwrap().company_name = "Alt GmbH".into();
+        st.persist().unwrap();
+        let mut backup = parse_backup(backup_json().as_bytes()).unwrap();
+        backup.db.customers.push(invoices_core::Customer { id: "new".into(), name: "Neu".into(), ..Default::default() });
+        backup.settings.company_name = "Neu GmbH".into();
+        let err = restore_into(&st, backup, |_| Err("save-failed: Permission denied (os error 13)".into())).unwrap_err();
+        assert_eq!(err, "restore-rolled-back: Permission denied (os error 13)");
+        // Speicher und Platte: alter Stand, alte Einstellungen
+        assert_eq!(st.db.lock().unwrap().customers[0].id, "old");
+        assert_eq!(st.settings.lock().unwrap().company_name, "Alt GmbH");
+        let on_disk = invoices_core::try_load_db(&dir.join("db.json")).ok().unwrap();
+        assert_eq!(on_disk.customers.len(), 1);
+        assert_eq!(on_disk.customers[0].id, "old");
         let _ = std::fs::remove_dir_all(&dir);
     }
 

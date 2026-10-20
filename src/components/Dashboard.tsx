@@ -16,9 +16,11 @@ interface Props {
 
 /// Umsatzbeitrag eines Belegs: Rechnungen +, Gutschriften −, Stornos
 /// bringen ihr (negatives) Vorzeichen selbst mit. Entwürfe, Angebote,
-/// AB und Lieferscheine zählen nicht.
+/// AB und Lieferscheine zählen nicht. Eine stornierte Rechnung zählt
+/// weiter positiv — ihre Stornorechnung hebt sie auf (sonst würde der
+/// Betrag doppelt abgezogen).
 function revenueCents(doc: Doc): number {
-  if (doc.status === 'draft' || doc.status === 'cancelled') return 0;
+  if (doc.status === 'draft') return 0;
   const gross = totals(doc.items, doc.smallBusiness).grossCents;
   if (doc.kind === 'invoice' || doc.kind === 'cancellation') return gross;
   if (doc.kind === 'creditnote') return -gross;

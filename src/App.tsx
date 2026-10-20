@@ -270,11 +270,18 @@ export default function App() {
     }
   };
 
-  const finalize = async (doc: Doc) => {
-    if (doc.items.length === 0 || doc.items.every((i) => !i.name.trim())) {
+  const finalize = async (input: Doc) => {
+    if (input.items.length === 0 || input.items.every((i) => !i.name.trim())) {
       showToast(t.needItems);
       return;
     }
+    // Kundenname und Anschrift werden beim Festschreiben eingefroren — mit
+    // dem aktuellen Stand der Kundenkartei, nicht dem beim Anlegen des
+    // Entwurfs gewählten (Kunde kann sich inzwischen geändert haben)
+    const cust = customers.find((c) => c.id === input.customerId);
+    const doc = cust
+      ? { ...input, customerName: cust.name, customerAddress: cust.address }
+      : input;
     if (!(await saveDraft(doc, true))) return;
     // gespeicherter Stand ist die neue Vergleichsbasis des Editors — scheitert
     // das Festschreiben (z. B. ungültiges Datum), fragt „Zurück“ nicht nach

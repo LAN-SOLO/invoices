@@ -21,9 +21,13 @@ pnpm build              # Typecheck + Frontend-Build
 cargo test --workspace  # Core (Geld, Nummernkreise, Workflow, E-Rechnung) + Backend-Helfer (Pfade, Backup, Wiederherstellung)
 ```
 
-Audit- und Teststand zur 1.0: `AUDIT-1.0.md` (inkl. Runde 2 und deren Verifikation).
+Audit- und Teststand zur 1.0: `AUDIT-1.0.md` (Runden 1–3 inkl. Verifikationen und manueller Testliste).
 
 JSON-Dateien (Datenbank, Einstellungen, Firmenliste, Backups) werden mit und ohne UTF-8-BOM gelesen (`invoices_core::strip_bom`) — der Windows-Editor speichert mit BOM.
+
+Wiederherstellung ist alles-oder-nichts: Sicherheitskopie `db.json.before-restore-*`, dann Datenbank, dann Einstellungen — scheitert der letzte Schritt, wird die Datenbank zurückgeschrieben (`restore-rolled-back`).
+
+Das ZUGFeRD-PDF (`src/zugferd.ts`) deklariert PDF/A-3b mit konsistenten Info-/XMP-Metadaten und sRGB-OutputIntent; die Standardschriften sind noch nicht eingebettet (keine TTF im Repo) — strenge PDF/A-Prüfer melden das.
 
 Rückfragen und Hinweise laufen ausschließlich über `src/dialogs.ts` (tauri-plugin-dialog, `await`) — nie `window.confirm/alert/prompt`, die das Plugin durch asynchrone Stubs ersetzt.
 
