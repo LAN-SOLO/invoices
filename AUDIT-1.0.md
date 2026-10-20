@@ -269,3 +269,24 @@ Nur auf echter Hardware prüfbar (zusätzlich zu Punkten 1–26):
 28. Artikel anlegen, Preis tippen und sofort „Speichern“ klicken (macOS-WebKit und WebView2) → Preis erhalten.
 29. ZUGFeRD-PDF mit veraPDF (PDF/A-3b) prüfen: erwartet nur noch die Schrift-Regeln (6.2.11.4.1), keine Metadaten-Regeln (6.6.2.3.x); Mustang: XML valide.
 30. Wiederherstellen, während die Einstellungsdatei schreibgeschützt ist (macOS `chmod -w settings*.json` bzw. Windows Schreibschutz) → Meldung „zurückgesetzt … nichts verändert“, Daten unverändert.
+31. Rechnung: Fälligkeitsdatum im Editor leeren → „Festschreiben“ → Meldung „gültiges Beleg-, Fälligkeits- und Leistungsdatum“, keine Nummer vergeben (macOS-WebKit und WebView2: `type=date` lässt sich dort per Löschen-Knopf leeren).
+
+### Runde 3 – Verifikation (2026-10-20, unabhängig)
+
+Diff `c705845..37aad0b` gegengelesen (Wiederherstellung, Festschreiben, Dashboard, Fälligkeit, Artikelpreis, ZUGFeRD-Metadaten, Help/i18n):
+
+- Wiederherstellung: DB-Lock wird über das Schreiben der Einstellungen gehalten, `store_for` nimmt keinen weiteren Lock → keine Verklemmung; bei `restore-partial` bleiben die Einstellungen im Speicher alt (passt zur Meldung), `db-changed` wird gesendet. In Ordnung.
+- Festschreiben mit aktueller Kundenkartei: `address` wird beim Speichern des Kunden per `composeAddress` gesetzt, also aktuell; einziger Aufrufer von `finalizeDoc` ist `App.finalize`; Storno übernimmt die eingefrorene Anschrift der Original-Rechnung. In Ordnung.
+- Dashboard: Storno gibt es nur für Rechnungen (`core::workflow::cancel`, `bad-kind`), daher kein Doppelzählen bei Gutschriften. In Ordnung.
+- ZUGFeRD: jsPDF setzt keine Author/Subject/Keywords, also keine weiteren Info-/XMP-Abweichungen.
+- Help DE/EN: 19 Kapitel, gleiche Anzahl Absätze je Kapitel (skriptgeprüft).
+
+Stichprobe von 10 Help-Aussagen, die Runde 3 nicht erwähnt hat: Kunde löschbar nur ohne Entwurf ✓, Unternehmen entfernen lässt Daten liegen ✓, Vorlagen mit Positionen/Einleitung/Notiz ohne Kunde ✓ (übernehmen getippte Werte über `committed()`), Standard-Einleitung nur in neuen Rechnungen ✓, Kopfzeile zeigt aktives Unternehmen ab zwei ✓, Windows-reservierte Namen abgelehnt ✓, Summe offener Rechnungen in der Leiste ✓, Vorschau-Auge auch für Entwürfe ✓, Auto-Update installiert beim Start ✓ — **falsch** war: „Festschreiben klappt nur mit gültigem … Fälligkeitsdatum — ein geleertes Datumsfeld verbraucht keine Nummer“. Eine Rechnung mit geleerter Fälligkeit wurde festgeschrieben; die XRechnung hatte dann bei positivem Betrag weder BT-9 noch BT-20 (Verstoß gegen BR-CO-25).
+
+Behoben:
+
+- `core::workflow::finalize`: Rechnungen ohne Fälligkeitsdatum → `doc-bad-date` (bestehende, schon passende Meldung DE/EN), keine Nummer. Angebote („Gültig bis“), Lieferscheine usw. dürfen weiter leer sein. Test `finalize_rejects_bad_dates_without_using_a_number` erweitert (ohne Fix rot, mit Fix grün). Help DE/EN präzisiert (Belegdatum immer, Fälligkeit bei Rechnungen, Leistungsdatum nur wenn eingetragen), README ergänzt. UI-Mock spiegelt die Regel; neue Journey „Rechnung ohne Fälligkeit“ (keine Nummer, übersetzte Meldung).
+
+Selbst ausgeführt (nach dem Fix): `cargo test --workspace` (13 Backend + 35 Core grün), `cargo clippy --workspace --all-targets` (12 Warnungen, identisch zum Stand vor dem Fix), Windows-Typecheck `cargo check --target x86_64-pc-windows-msvc --workspace --tests` mit erzwungenem Neu-Check beider Crates (fehlerfrei), `pnpm build` (fehlerfrei), UI-Harness DE/EN × Hell/Dunkel: Journeys J2–J10 + neue Prüfung 42/42 je Kombination (in dieser Zählung; die „47“ aus Runde 3 wurden nicht exakt nachvollzogen), Regression 51/51 je Kombination, Erststart-Sprache de-DE/en-US ✓. `cargo audit`/`pnpm audit` nicht erneut ausgeführt (keine Abhängigkeitsänderung).
+
+Nur gegengelesen, nicht ausgeführt: echte Tauri-IPC, native Dialoge, Windows-Binary (nur Typecheck), veraPDF/Mustang. Weiter offen wie oben (Schrifteinbettung, jsPDF-Major-Update, Punkte 1–31 auf echter Hardware).

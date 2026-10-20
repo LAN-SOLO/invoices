@@ -27,6 +27,8 @@ JSON-Dateien (Datenbank, Einstellungen, Firmenliste, Backups) werden mit und ohn
 
 Wiederherstellung ist alles-oder-nichts: Sicherheitskopie `db.json.before-restore-*`, dann Datenbank, dann Einstellungen — scheitert der letzte Schritt, wird die Datenbank zurückgeschrieben (`restore-rolled-back`).
 
+Festschreiben verlangt ein gültiges Belegdatum und bei Rechnungen ein Fälligkeitsdatum (`doc-bad-date`, sonst fehlt der XRechnung BT-9/BT-20 — BR-CO-25); ein leeres Leistungsdatum gilt als Belegdatum.
+
 Das ZUGFeRD-PDF (`src/zugferd.ts`) deklariert PDF/A-3b mit konsistenten Info-/XMP-Metadaten und sRGB-OutputIntent; die Standardschriften sind noch nicht eingebettet (keine TTF im Repo) — strenge PDF/A-Prüfer melden das.
 
 Rückfragen und Hinweise laufen ausschließlich über `src/dialogs.ts` (tauri-plugin-dialog, `await`) — nie `window.confirm/alert/prompt`, die das Plugin durch asynchrone Stubs ersetzt.

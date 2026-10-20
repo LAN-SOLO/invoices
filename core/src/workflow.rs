@@ -94,7 +94,10 @@ pub fn finalize<'a>(
     // das Rechnungsdatum der E-Rechnung hängen daran.
     {
         let d = &db.docs[idx];
+        // Rechnungen brauchen eine Fälligkeit: ohne sie fehlt der
+        // E-Rechnung bei positivem Betrag BT-9/BT-20 (BR-CO-25)
         if !valid_iso_date(&d.date)
+            || (d.kind == DocKind::Invoice && d.due_date.trim().is_empty())
             || (!d.due_date.is_empty() && !valid_iso_date(&d.due_date))
             || (!d.service_date.is_empty() && !valid_iso_date(&d.service_date))
         {
@@ -293,6 +296,11 @@ mod tests {
         badservice.service_date = "2026-02-30".into();
         upsert_draft(&mut db, badservice).unwrap();
         assert_eq!(finalize(&mut db, "d3", "RE", fmt).unwrap_err(), "doc-bad-date");
+        // Rechnung mit geleerter Fälligkeit: keine Nummer (BR-CO-25)
+        let mut nodue = draft("d6", DocKind::Invoice);
+        nodue.due_date = String::new();
+        upsert_draft(&mut db, nodue).unwrap();
+        assert_eq!(finalize(&mut db, "d6", "RE", fmt).unwrap_err(), "doc-bad-date");
         // leere Fälligkeit/Leistungsdatum sind erlaubt (Lieferschein, = Belegdatum)
         let mut ok = draft("d4", DocKind::DeliveryNote);
         ok.due_date = String::new();
