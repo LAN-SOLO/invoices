@@ -290,3 +290,22 @@ Behoben:
 Selbst ausgeführt (nach dem Fix): `cargo test --workspace` (13 Backend + 35 Core grün), `cargo clippy --workspace --all-targets` (12 Warnungen, identisch zum Stand vor dem Fix), Windows-Typecheck `cargo check --target x86_64-pc-windows-msvc --workspace --tests` mit erzwungenem Neu-Check beider Crates (fehlerfrei), `pnpm build` (fehlerfrei), UI-Harness DE/EN × Hell/Dunkel: Journeys J2–J10 + neue Prüfung 42/42 je Kombination (in dieser Zählung; die „47“ aus Runde 3 wurden nicht exakt nachvollzogen), Regression 51/51 je Kombination, Erststart-Sprache de-DE/en-US ✓. `cargo audit`/`pnpm audit` nicht erneut ausgeführt (keine Abhängigkeitsänderung).
 
 Nur gegengelesen, nicht ausgeführt: echte Tauri-IPC, native Dialoge, Windows-Binary (nur Typecheck), veraPDF/Mustang. Weiter offen wie oben (Schrifteinbettung, jsPDF-Major-Update, Punkte 1–31 auf echter Hardware).
+
+### Runde 4 – Regressionen (platform)
+
+Diff `c705845..cdc6317` mit Blick auf Nebenläufigkeit, Plattform und Lebenszyklus gegengelesen:
+
+- `restore_into`: Lock-Reihenfolge unverändert (DB-Lock, danach erst `settings`-Lock nach `drop(db)`; `finalize_doc`/`cancel_doc` nehmen `settings` nur als Temporär-Klon vor dem DB-Lock) → keine Verklemmung. `import_backup` läuft als `async`-Befehl im Thread-Pool; der DB-Lock wird jetzt zusätzlich über das Schreiben der Einstellungen gehalten (unter Windows bei gesperrter Datei bis ~0,6 s Rename-Wiederholung) — sync-Befehle warten so lange, kein Hänger. `write_atomic` lässt die Einstellungsdatei beim Fehlschlag unverändert, „restore-rolled-back“ ist also zutreffend. `db-changed` nur bei Erfolg/„restore-partial“, Dialog bleibt bei beiden Fehlern offen.
+- Festschreiben mit aktueller Kundenkartei: Anschrift im Editor nicht je Beleg editierbar, es wird also keine Benutzereingabe überschrieben.
+- Dashboard: auch 0.4.0-Stornos haben negierte Preise (im Tag `v0.4.0` geprüft) → Altdaten heben sich ebenfalls auf; `set_paid` erlaubt keinen Weg zurück aus „storniert“.
+- Fälligkeit folgt Belegdatum nur bei Belegarten ohne sichtbares Fälligkeitsfeld (Gutschrift, AB, Lieferschein) → keine Eingabe geht verloren. Artikelpreis: `centsToInput`/`parseMoney` runden verlustfrei (DE/EN).
+- ZUGFeRD-Metadaten: Werte werden nach `PDFDocument.load` gesetzt, überschreiben also pdf-lib-Vorgaben.
+- Keine Windows-spezifischen Zweige neu; Windows-Typecheck `cargo check --target x86_64-pc-windows-msvc --workspace --tests` fehlerfrei. i18n: `en: typeof de` erzwingt beide neuen Fehlercodes.
+
+Keine Regression gefunden, kein Code geändert. Ausgeführt: `cargo test --workspace` (13 Backend + 35 Core grün), `pnpm build` (fehlerfrei), Windows-Typecheck.
+
+Hinweise (kein Defekt dieser Runde, nicht geändert):
+
+- Hilfe DE/EN „Ein geleertes Beleg- oder Fälligkeitsdatum verbraucht keine Nummer“ gilt für die Fälligkeit nur bei Rechnungen — ein Angebot mit geleertem „Gültig bis“ wird regulär festgeschrieben. Formulierung bei Gelegenheit schärfen.
+- Gutschrift-Entwürfe aus Altdaten mit leerer Fälligkeit lassen sich weiter festschreiben; die XRechnung hätte dann bei positivem Betrag kein BT-9 (BR-CO-25). Neue Gutschriften setzen die Fälligkeit immer (Anlage + Datumsänderung). Bei Bedarf in 1.1 die Prüfung in `core::workflow::finalize` auf Gutschriften ausweiten.
+- Vorbestehend (Runde 2): `active_company` wird in `import_backup` vor dem DB-Pfad gelesen; ein gleichzeitiger Unternehmenswechsel könnte DB und Einstellungen in verschiedene Unternehmen schreiben (praktisch nicht auslösbar, da modal).
